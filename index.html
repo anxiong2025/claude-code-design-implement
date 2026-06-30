@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>从零构建 Claude Code</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --sidebar-width: 280px;
+    --bg: #fafaf8;
+    --sidebar-bg: #f4f4f1;
+    --sidebar-border: #e5e5e0;
+    --ink: #1a1a18;
+    --ink2: #52524e;
+    --ink3: #a8a89f;
+    --accent: #6d45c9;
+    --accent-bg: rgba(109,69,201,0.08);
+    --code-bg: #f0f0ec;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --sans: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+    --content-max: 720px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--ink);
+    display: flex;
+    min-height: 100vh;
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  /* ── 侧边栏 ── */
+  #sidebar {
+    width: var(--sidebar-width);
+    min-width: var(--sidebar-width);
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
+    height: 100vh;
+    position: sticky;
+    top: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    transition: width 0.2s ease, min-width 0.2s ease, opacity 0.2s ease;
+  }
+  #sidebar.collapsed {
+    width: 0;
+    min-width: 0;
+    opacity: 0;
+    overflow: hidden;
+    border-right: none;
+  }
+
+  .sidebar-title {
+    padding: 24px 20px 16px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: -0.01em;
+    border-bottom: 1px solid var(--sidebar-border);
+    line-height: 1.4;
+  }
+
+  .sidebar-title span {
+    display: block;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--ink3);
+    margin-top: 3px;
+    letter-spacing: 0.02em;
+  }
+
+  nav { padding: 12px 0 40px; }
+
+  .nav-group { }
+
+  .nav-chapter {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 20px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--ink);
+    text-decoration: none;
+    cursor: pointer;
+    transition: color 0.15s;
+    user-select: none;
+  }
+  .nav-chapter:hover { color: var(--accent); }
+  .nav-chapter.active { color: var(--accent); }
+
+  .nav-arrow {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: var(--ink3);
+    transition: transform 0.18s;
+    margin-left: auto;
+  }
+  .nav-group.open .nav-arrow { transform: rotate(90deg); }
+
+  .nav-sections {
+    overflow: hidden;
+    max-height: 0;
+    transition: max-height 0.22s ease;
+  }
+  .nav-group.open .nav-sections { max-height: 400px; }
+
+  .nav-section {
+    display: block;
+    padding: 5px 20px 5px 36px;
+    font-size: 12.5px;
+    color: var(--ink2);
+    text-decoration: none;
+    cursor: pointer;
+    transition: color 0.15s;
+    position: relative;
+  }
+  .nav-section::before {
+    content: '';
+    position: absolute;
+    left: 26px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--ink3);
+    transition: background 0.15s;
+  }
+  .nav-section:hover { color: var(--accent); }
+  .nav-section:hover::before { background: var(--accent); }
+  .nav-section.active { color: var(--accent); font-weight: 500; }
+  .nav-section.active::before { background: var(--accent); }
+
+  .nav-divider {
+    height: 1px;
+    background: var(--sidebar-border);
+    margin: 10px 20px;
+  }
+
+  /* ── 主内容区 ── */
+  #main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  /* 顶部工具栏 */
+  #toolbar {
+    height: 48px;
+    border-bottom: 1px solid var(--sidebar-border);
+    display: flex;
+    align-items: center;
+    padding: 0 32px;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 10;
+  }
+
+  .toolbar-btn {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--ink2);
+    transition: background 0.15s, color 0.15s;
+    border: none;
+    background: none;
+    font-size: 15px;
+  }
+  .toolbar-btn:hover { background: var(--code-bg); color: var(--ink); }
+
+  .toolbar-title {
+    flex: 1;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--ink2);
+  }
+
+  .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* 内容区 */
+  #content-wrap {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    padding: 0 40px;
+  }
+
+  #content {
+    width: 100%;
+    max-width: var(--content-max);
+    padding: 48px 0 120px;
+  }
+
+  /* 章节页 */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* 章节标题 */
+  .chapter-eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink3);
+    margin-bottom: 12px;
+  }
+
+  h1 {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    color: var(--ink);
+    margin-bottom: 16px;
+  }
+
+  .chapter-subtitle {
+    font-size: 15px;
+    color: var(--ink2);
+    line-height: 1.6;
+    padding-bottom: 28px;
+    border-bottom: 1px solid var(--sidebar-border);
+    margin-bottom: 36px;
+  }
+
+  /* 小节 */
+  h2 {
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    margin: 40px 0 12px;
+  }
+
+  h3 {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--ink3);
+    margin: 28px 0 8px;
+  }
+
+  p { margin-bottom: 16px; color: var(--ink2); }
+
+  code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--code-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--ink);
+  }
+
+  pre {
+    background: var(--code-bg);
+    border-radius: 8px;
+    padding: 16px 20px;
+    overflow-x: auto;
+    margin: 16px 0 24px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--ink);
+  }
+
+  /* 目标卡片 */
+  .goal-card {
+    background: var(--accent-bg);
+    border: 1px solid rgba(109,69,201,0.2);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 32px;
+  }
+  .goal-card-label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+  .goal-card p {
+    color: var(--ink);
+    margin: 0;
+    font-size: 14px;
+  }
+
+  /* 文件引用 */
+  .file-ref {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--accent);
+    background: var(--accent-bg);
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  /* 导航按钮 */
+  .page-nav {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 64px;
+    padding-top: 24px;
+    border-top: 1px solid var(--sidebar-border);
+  }
+  .page-nav-btn {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    cursor: pointer;
+    padding: 12px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--sidebar-border);
+    background: none;
+    transition: background 0.15s, border-color 0.15s;
+    text-align: left;
+    min-width: 180px;
+  }
+  .page-nav-btn:hover { background: var(--code-bg); border-color: var(--ink3); }
+  .page-nav-btn.next { text-align: right; }
+  .page-nav-btn .nav-dir {
+    font-size: 11px;
+    color: var(--ink3);
+    font-family: var(--mono);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .page-nav-btn .nav-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .page-nav-btn .nav-sub {
+    font-size: 12px;
+    color: var(--ink2);
+  }
+
+  /* 封面页 */
+  .cover-badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-bg);
+    padding: 4px 10px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+  }
+  .cover h1 {
+    font-size: 36px;
+    margin-bottom: 12px;
+  }
+  .cover-lead {
+    font-size: 16px;
+    color: var(--ink2);
+    line-height: 1.7;
+    max-width: 560px;
+    margin-bottom: 40px;
+  }
+
+  .toc-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .toc-chapter {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--ink);
+    padding: 8px 0 4px;
+    border-top: 1px solid var(--sidebar-border);
+    cursor: pointer;
+  }
+  .toc-chapter:hover { color: var(--accent); }
+  .toc-chapter:first-child { border-top: none; }
+  .toc-section {
+    font-size: 12.5px;
+    color: var(--ink2);
+    padding: 3px 0 3px 16px;
+    cursor: pointer;
+  }
+  .toc-section:hover { color: var(--accent); }
+
+  /* 表格 */
+  table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: 13.5px; }
+  th { background: var(--code-bg); font-weight: 600; text-align: left; padding: 8px 12px; color: var(--ink); border-bottom: 2px solid var(--sidebar-border); }
+  td { padding: 8px 12px; color: var(--ink2); border-bottom: 1px solid var(--sidebar-border); }
+  tr:last-child td { border-bottom: none; }
+
+  /* 评论区 */
+  .comments-section {
+    margin-top: 64px;
+    padding-top: 32px;
+    border-top: 1px solid var(--sidebar-border);
+  }
+  .comments-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink3);
+    margin-bottom: 20px;
+  }
+
+  /* 响应式 */
+  @media (max-width: 768px) {
+    #sidebar { display: none; }
+    #content-wrap { padding: 0 20px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ══════════════ 侧边栏 ══════════════ -->
+<aside id="sidebar">
+  <div class="sidebar-title">
+    从零构建 Claude Code
+    <span>Agent 系统设计实战</span>
+  </div>
+  <nav id="nav">
+    <a class="nav-chapter active" onclick="showPage('cover')">封面</a>
+
+    <div class="nav-divider"></div>
+
+    <div class="nav-group open" id="group-ch1">
+      <div class="nav-chapter" onclick="toggleGroup('ch1')">
+        第一章 · Agent 是什么
+        <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="nav-sections">
+        <a class="nav-section" onclick="showPage('ch1')">1.1 消息就是状态</a>
+        <a class="nav-section" onclick="showPage('ch1')">1.2 主循环是一个 Generator</a>
+        <a class="nav-section" onclick="showPage('ch1')">1.3 工具结果注入</a>
+        <a class="nav-section" onclick="showPage('ch1')">1.4 maxTurns 断路器</a>
+      </div>
+    </div>
+
+    <div class="nav-group open" id="group-ch2">
+      <div class="nav-chapter" onclick="toggleGroup('ch2')">
+        第二章 · 工具系统
+        <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="nav-sections">
+        <a class="nav-section" onclick="showPage('ch2')">2.1 Tool 自我声明</a>
+        <a class="nav-section" onclick="showPage('ch2')">2.2 工具注册表</a>
+        <a class="nav-section" onclick="showPage('ch2')">2.3 读并发 / 写独占分批</a>
+        <a class="nav-section" onclick="showPage('ch2')">2.4 MCP 工具与内置工具等价</a>
+      </div>
+    </div>
+
+    <div class="nav-group open" id="group-ch3">
+      <div class="nav-chapter" onclick="toggleGroup('ch3')">
+        第三章 · 子 Agent
+        <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="nav-sections">
+        <a class="nav-section" onclick="showPage('ch3')">3.1 递归就是多 Agent</a>
+        <a class="nav-section" onclick="showPage('ch3')">3.2 上下文隔离的实现</a>
+        <a class="nav-section" onclick="showPage('ch3')">3.3 同步 vs 异步派发</a>
+        <a class="nav-section" onclick="showPage('ch3')">3.4 三道防线防过度拆分</a>
+        <a class="nav-section" onclick="showPage('ch3')">3.5 Worktree 文件系统隔离</a>
+      </div>
+    </div>
+
+    <div class="nav-group open" id="group-ch4">
+      <div class="nav-chapter" onclick="toggleGroup('ch4')">
+        第四章 · 协调器模式
+        <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="nav-sections">
+        <a class="nav-section" onclick="showPage('ch4')">4.1 Coordinator 本质是系统 Prompt</a>
+        <a class="nav-section" onclick="showPage('ch4')">4.2 Worker 结果回灌机制</a>
+        <a class="nav-section" onclick="showPage('ch4')">4.3 SendMessage 继续 Worker</a>
+        <a class="nav-section" onclick="showPage('ch4')">4.4 并发管理与任务停止</a>
+      </div>
+    </div>
+
+    <div class="nav-group open" id="group-ch5">
+      <div class="nav-chapter" onclick="toggleGroup('ch5')">
+        第五章 · Agent 间通信
+        <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="nav-sections">
+        <a class="nav-section" onclick="showPage('ch5')">5.1 Mailbox 极简实现</a>
+        <a class="nav-section" onclick="showPage('ch5')">5.2 Agent 寻址</a>
+        <a class="nav-section" onclick="showPage('ch5')">5.3 消息分类与过滤</a>
+      </div>
+    </div>
+
+    <div class="nav-group open" id="group-ch6">
+      <div class="nav-chapter" onclick="toggleGroup('ch6')">
+        第六章 · 权限与安全
+        <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="nav-sections">
+        <a class="nav-section" onclick="showPage('ch6')">6.1 权限模式</a>
+        <a class="nav-section" onclick="showPage('ch6')">6.2 工具黑白名单</a>
+        <a class="nav-section" onclick="showPage('ch6')">6.3 Abort 信号传播</a>
+      </div>
+    </div>
+
+    <div class="nav-group open" id="group-ch7">
+      <div class="nav-chapter" onclick="toggleGroup('ch7')">
+        第七章 · Session 持久化
+        <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="nav-sections">
+        <a class="nav-section" onclick="showPage('ch7')">7.1 Session State 序列化</a>
+        <a class="nav-section" onclick="showPage('ch7')">7.2 恢复机制</a>
+        <a class="nav-section" onclick="showPage('ch7')">7.3 Compact 上下文压缩</a>
+      </div>
+    </div>
+
+    <div class="nav-divider"></div>
+
+    <a class="nav-chapter" onclick="showPage('ref')">核心文件速查</a>
+  </nav>
+</aside>
+
+<!-- ══════════════ 主内容区 ══════════════ -->
+<div id="main">
+  <div id="toolbar">
+    <button class="toolbar-btn" title="目录" onclick="toggleSidebar()">☰</button>
+    <button class="toolbar-btn" title="搜索">⌕</button>
+    <div class="toolbar-title" id="toolbar-title">从零构建 Claude Code</div>
+    <div class="toolbar-right">
+      <button class="toolbar-btn" title="上一页" onclick="prevPage()">‹</button>
+      <button class="toolbar-btn" title="下一页" onclick="nextPage()">›</button>
+    </div>
+  </div>
+
+  <div id="content-wrap">
+    <div id="content">
+
+      <!-- ══ 封面 ══ -->
+      <div class="page active cover" id="page-cover">
+        <div class="cover-badge">源码实战指南</div>
+        <h1>从零构建 Claude Code</h1>
+        <p class="cover-lead">
+          基于 Claude Code 真实源码，从产品角度规划七个能力层，
+          每章实现完即可验证一个独立能力，最终拥有一个和 Claude Code 架构一致的 Agent 系统。
+        </p>
+
+        <ul class="toc-list">
+          <li class="toc-chapter" onclick="showPage('ch1')">第一章 · Agent 是什么——核心循环</li>
+          <li class="toc-section" onclick="showPage('ch1')">消息就是状态 · 主循环 Generator · 工具结果注入 · maxTurns 断路器</li>
+
+          <li class="toc-chapter" onclick="showPage('ch2')">第二章 · 工具系统——Agent 的手</li>
+          <li class="toc-section" onclick="showPage('ch2')">Tool 自我声明 · 工具注册表 · 读并发/写独占 · MCP 等价接入</li>
+
+          <li class="toc-chapter" onclick="showPage('ch3')">第三章 · 子 Agent——递归就是多 Agent</li>
+          <li class="toc-section" onclick="showPage('ch3')">上下文隔离 · 同步/异步派发 · 三道防线 · Worktree 隔离</li>
+
+          <li class="toc-chapter" onclick="showPage('ch4')">第四章 · 协调器模式——星形多 Agent</li>
+          <li class="toc-section" onclick="showPage('ch4')">Coordinator 本质 · task-notification 回灌 · SendMessage · 并发管理</li>
+
+          <li class="toc-chapter" onclick="showPage('ch5')">第五章 · Agent 间通信——Mailbox</li>
+          <li class="toc-section" onclick="showPage('ch5')">极简实现 73 行 · Agent 寻址 · 消息分类过滤</li>
+
+          <li class="toc-chapter" onclick="showPage('ch6')">第六章 · 权限与安全</li>
+          <li class="toc-section" onclick="showPage('ch6')">权限模式 · 工具黑白名单 · Abort 信号传播</li>
+
+          <li class="toc-chapter" onclick="showPage('ch7')">第七章 · Session 持久化与恢复</li>
+          <li class="toc-section" onclick="showPage('ch7')">State 序列化 · 恢复机制 · Compact 压缩</li>
+
+          <li class="toc-chapter" onclick="showPage('ref')">核心文件速查</li>
+        </ul>
+
+        <div class="page-nav">
+          <div></div>
+          <button class="page-nav-btn next" onclick="showPage('ch1')">
+            <span class="nav-dir">下一章 →</span>
+            <span class="nav-title">第一章 · Agent 是什么</span>
+            <span class="nav-sub">核心循环</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ══ 第一章 ══ -->
+      <div class="page" id="page-ch1">
+        <div class="chapter-eyebrow">第一章</div>
+        <h1>Agent 是什么——核心循环</h1>
+        <p class="chapter-subtitle">
+          实现目标：用户输入一句话，Agent 能调多轮工具，自己决定什么时候停，返回最终结论。
+          做完这章，单 Agent 跑通。
+        </p>
+
+        <h2>1.1 消息就是状态</h2>
+        <p>（内容待填）</p>
+
+        <h2>1.2 主循环是一个 Generator</h2>
+        <p>（内容待填）</p>
+
+        <h2>1.3 工具结果注入</h2>
+        <p>（内容待填）</p>
+
+        <h2>1.4 maxTurns 断路器</h2>
+        <p>（内容待填）</p>
+
+        <div class="page-nav">
+          <button class="page-nav-btn" onclick="showPage('cover')">
+            <span class="nav-dir">← 上一页</span>
+            <span class="nav-title">封面</span>
+          </button>
+          <button class="page-nav-btn next" onclick="showPage('ch2')">
+            <span class="nav-dir">下一章 →</span>
+            <span class="nav-title">第二章 · 工具系统</span>
+            <span class="nav-sub">Agent 的手</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ══ 第二章 ══ -->
+      <div class="page" id="page-ch2">
+        <div class="chapter-eyebrow">第二章</div>
+        <h1>工具系统——Agent 的手</h1>
+        <p class="chapter-subtitle">
+          实现目标：Agent 能调 Bash、读写文件等多种工具，且读操作并发、写操作串行，互不干扰。
+        </p>
+
+        <h2>2.1 Tool 自我声明</h2>
+        <p>（内容待填）</p>
+
+        <h2>2.2 工具注册表</h2>
+        <p>（内容待填）</p>
+
+        <h2>2.3 读并发 / 写独占分批</h2>
+        <p>（内容待填）</p>
+
+        <h2>2.4 MCP 工具与内置工具等价</h2>
+        <p>（内容待填）</p>
+
+        <div class="page-nav">
+          <button class="page-nav-btn" onclick="showPage('ch1')">
+            <span class="nav-dir">← 上一章</span>
+            <span class="nav-title">第一章 · Agent 是什么</span>
+          </button>
+          <button class="page-nav-btn next" onclick="showPage('ch3')">
+            <span class="nav-dir">下一章 →</span>
+            <span class="nav-title">第三章 · 子 Agent</span>
+            <span class="nav-sub">递归就是多 Agent</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ══ 第三章 ══ -->
+      <div class="page" id="page-ch3">
+        <div class="chapter-eyebrow">第三章</div>
+        <h1>子 Agent——递归就是多 Agent</h1>
+        <p class="chapter-subtitle">
+          实现目标：主 Agent 能派出子 Agent 并行干活，子 Agent 看不到父 Agent 的历史，结果干净返回。
+        </p>
+
+        <h2>3.1 递归就是多 Agent</h2>
+        <p>（内容待填）</p>
+
+        <h2>3.2 上下文隔离的实现</h2>
+        <p>（内容待填）</p>
+
+        <h2>3.3 同步 vs 异步派发</h2>
+        <p>（内容待填）</p>
+
+        <h2>3.4 三道防线防过度拆分</h2>
+        <p>（内容待填）</p>
+
+        <h2>3.5 Worktree 文件系统隔离</h2>
+        <p>（内容待填）</p>
+
+        <div class="page-nav">
+          <button class="page-nav-btn" onclick="showPage('ch2')">
+            <span class="nav-dir">← 上一章</span>
+            <span class="nav-title">第二章 · 工具系统</span>
+          </button>
+          <button class="page-nav-btn next" onclick="showPage('ch4')">
+            <span class="nav-dir">下一章 →</span>
+            <span class="nav-title">第四章 · 协调器模式</span>
+            <span class="nav-sub">星形多 Agent</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ══ 第四章 ══ -->
+      <div class="page" id="page-ch4">
+        <div class="chapter-eyebrow">第四章</div>
+        <h1>协调器模式——星形多 Agent</h1>
+        <p class="chapter-subtitle">
+          实现目标：一个 Coordinator 同时管多个 Worker，Worker 异步汇报结果，Coordinator 综合后再派新任务。
+        </p>
+
+        <h2>4.1 Coordinator 本质是系统 Prompt</h2>
+        <p>（内容待填）</p>
+
+        <h2>4.2 Worker 结果回灌机制</h2>
+        <p>（内容待填）</p>
+
+        <h2>4.3 SendMessage 继续 Worker</h2>
+        <p>（内容待填）</p>
+
+        <h2>4.4 并发管理与任务停止</h2>
+        <p>（内容待填）</p>
+
+        <div class="page-nav">
+          <button class="page-nav-btn" onclick="showPage('ch3')">
+            <span class="nav-dir">← 上一章</span>
+            <span class="nav-title">第三章 · 子 Agent</span>
+          </button>
+          <button class="page-nav-btn next" onclick="showPage('ch5')">
+            <span class="nav-dir">下一章 →</span>
+            <span class="nav-title">第五章 · Agent 间通信</span>
+            <span class="nav-sub">Mailbox</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ══ 第五章 ══ -->
+      <div class="page" id="page-ch5">
+        <div class="chapter-eyebrow">第五章</div>
+        <h1>Agent 间通信——Mailbox</h1>
+        <p class="chapter-subtitle">
+          实现目标：任意 Agent 可以给另一个 Agent 发消息，接收方可以阻塞等待，也可以非阻塞轮询。
+        </p>
+
+        <h2>5.1 Mailbox 极简实现</h2>
+        <p>（内容待填）</p>
+
+        <h2>5.2 Agent 寻址</h2>
+        <p>（内容待填）</p>
+
+        <h2>5.3 消息分类与过滤</h2>
+        <p>（内容待填）</p>
+
+        <div class="page-nav">
+          <button class="page-nav-btn" onclick="showPage('ch4')">
+            <span class="nav-dir">← 上一章</span>
+            <span class="nav-title">第四章 · 协调器模式</span>
+          </button>
+          <button class="page-nav-btn next" onclick="showPage('ch6')">
+            <span class="nav-dir">下一章 →</span>
+            <span class="nav-title">第六章 · 权限与安全</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ══ 第六章 ══ -->
+      <div class="page" id="page-ch6">
+        <div class="chapter-eyebrow">第六章</div>
+        <h1>权限与安全</h1>
+        <p class="chapter-subtitle">
+          实现目标：不同场景下工具的使用需要不同级别的授权，子 Agent 不能越权操作。
+        </p>
+
+        <h2>6.1 权限模式</h2>
+        <p>（内容待填）</p>
+
+        <h2>6.2 工具黑白名单</h2>
+        <p>（内容待填）</p>
+
+        <h2>6.3 Abort 信号传播</h2>
+        <p>（内容待填）</p>
+
+        <div class="page-nav">
+          <button class="page-nav-btn" onclick="showPage('ch5')">
+            <span class="nav-dir">← 上一章</span>
+            <span class="nav-title">第五章 · Agent 间通信</span>
+          </button>
+          <button class="page-nav-btn next" onclick="showPage('ch7')">
+            <span class="nav-dir">下一章 →</span>
+            <span class="nav-title">第七章 · Session 持久化</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ══ 第七章 ══ -->
+      <div class="page" id="page-ch7">
+        <div class="chapter-eyebrow">第七章</div>
+        <h1>Session 持久化与恢复</h1>
+        <p class="chapter-subtitle">
+          实现目标：进程崩溃或用户中断后，能从上次中断点恢复，不丢失工作进度。
+        </p>
+
+        <h2>7.1 Session State 序列化</h2>
+        <p>（内容待填）</p>
+
+        <h2>7.2 恢复机制</h2>
+        <p>（内容待填）</p>
+
+        <h2>7.3 Compact 上下文压缩</h2>
+        <p>（内容待填）</p>
+
+        <div class="page-nav">
+          <button class="page-nav-btn" onclick="showPage('ch6')">
+            <span class="nav-dir">← 上一章</span>
+            <span class="nav-title">第六章 · 权限与安全</span>
+          </button>
+          <button class="page-nav-btn next" onclick="showPage('ref')">
+            <span class="nav-dir">下一页 →</span>
+            <span class="nav-title">核心文件速查</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ══ 核心文件速查 ══ -->
+      <div class="page" id="page-ref">
+        <div class="chapter-eyebrow">附录</div>
+        <h1>核心文件速查</h1>
+        <p class="chapter-subtitle">
+          各章节对应的源码文件与关键函数，配合阅读时直接定位。
+        </p>
+
+        <table>
+          <thead>
+            <tr><th>章节</th><th>文件</th><th>关键函数 / 类</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>第 1 章</td><td><code>src/query.ts</code></td><td><code>query()</code> / <code>queryLoop()</code></td></tr>
+            <tr><td>第 2 章</td><td><code>src/services/tools/toolOrchestration.ts</code></td><td><code>runTools()</code></td></tr>
+            <tr><td>第 3 章</td><td><code>src/tools/AgentTool/AgentTool.tsx</code></td><td><code>call()</code></td></tr>
+            <tr><td>第 3 章</td><td><code>src/coordinator/runAgent.ts</code></td><td><code>runAgent()</code></td></tr>
+            <tr><td>第 4 章</td><td><code>src/coordinator/coordinatorMode.ts</code></td><td><code>getCoordinatorSystemPrompt()</code></td></tr>
+            <tr><td>第 5 章</td><td><code>src/utils/mailbox.ts</code></td><td><code>Mailbox</code> class</td></tr>
+            <tr><td>第 5 章</td><td><code>src/tools/SendMessageTool/SendMessageTool.ts</code></td><td><code>call()</code></td></tr>
+            <tr><td>第 6 章</td><td><code>src/utils/permissions/</code></td><td><code>canUseTool()</code></td></tr>
+            <tr><td>第 7 章</td><td><code>src/utils/sessionStorage.ts</code></td><td><code>writeAgentMetadata()</code></td></tr>
+          </tbody>
+        </table>
+
+        <div class="page-nav">
+          <button class="page-nav-btn" onclick="showPage('ch7')">
+            <span class="nav-dir">← 上一章</span>
+            <span class="nav-title">第七章 · Session 持久化</span>
+          </button>
+          <div></div>
+        </div>
+      </div>
+
+      <!-- 评论区（所有章节共用，切换页面时重新渲染） -->
+      <div class="comments-section" id="comments-section" style="display:none">
+        <div class="comments-label">评论 · 需要 GitHub 账号</div>
+        <div class="giscus"></div>
+      </div>
+
+    </div><!-- #content -->
+  </div><!-- #content-wrap -->
+</div><!-- #main -->
+
+<script>
+  const pages = ['cover','ch1','ch2','ch3','ch4','ch5','ch6','ch7','ref'];
+  const titles = {
+    cover: '从零构建 Claude Code',
+    ch1: '第一章 · Agent 是什么',
+    ch2: '第二章 · 工具系统',
+    ch3: '第三章 · 子 Agent',
+    ch4: '第四章 · 协调器模式',
+    ch5: '第五章 · Agent 间通信',
+    ch6: '第六章 · 权限与安全',
+    ch7: '第七章 · Session 持久化',
+    ref: '核心文件速查',
+  };
+
+  let current = 'cover';
+
+  function toggleGroup(id) {
+    const group = document.getElementById('group-' + id);
+    if (!group) return;
+    const isOpen = group.classList.contains('open');
+    if (isOpen) {
+      group.classList.remove('open');
+    } else {
+      group.classList.add('open');
+      showPage(id);
+    }
+  }
+
+  const noComments = new Set(['cover', 'ref']);
+
+  function loadGiscus(pageId) {
+    const section = document.getElementById('comments-section');
+    if (noComments.has(pageId)) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = 'block';
+    const container = section.querySelector('.giscus');
+    container.innerHTML = '';
+    const script = document.createElement('script');
+    script.src = 'https://giscus.app/client.js';
+    script.setAttribute('data-repo', 'anxiong2025/claude-code-design-implement');
+    script.setAttribute('data-repo-id', 'R_kgDOTJVGQg');
+    script.setAttribute('data-category', 'General');
+    script.setAttribute('data-category-id', 'DIC_kwDOTJVGQs4DAMwv');
+    script.setAttribute('data-mapping', 'specific');
+    script.setAttribute('data-term', pageId);
+    script.setAttribute('data-strict', '0');
+    script.setAttribute('data-reactions-enabled', '1');
+    script.setAttribute('data-emit-metadata', '0');
+    script.setAttribute('data-input-position', 'top');
+    script.setAttribute('data-theme', 'preferred_color_scheme');
+    script.setAttribute('data-lang', 'zh-CN');
+    script.setAttribute('crossorigin', 'anonymous');
+    script.async = true;
+    container.appendChild(script);
+  }
+
+  function showPage(id) {
+    document.getElementById('page-' + current)?.classList.remove('active');
+    current = id;
+    document.getElementById('page-' + id)?.classList.add('active');
+    document.getElementById('toolbar-title').textContent = titles[id] || '';
+
+    // 展开对应章节，折叠其他
+    ['ch1','ch2','ch3','ch4','ch5','ch6','ch7'].forEach(ch => {
+      const g = document.getElementById('group-' + ch);
+      if (!g) return;
+      if (ch === id) g.classList.add('open');
+      else g.classList.remove('open');
+    });
+
+    loadGiscus(id);
+    window.scrollTo(0, 0);
+  }
+
+  function nextPage() {
+    const idx = pages.indexOf(current);
+    if (idx < pages.length - 1) showPage(pages[idx + 1]);
+  }
+  function prevPage() {
+    const idx = pages.indexOf(current);
+    if (idx > 0) showPage(pages[idx - 1]);
+  }
+
+  function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('collapsed');
+  }
+
+  // 键盘左右翻页
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight') nextPage();
+    if (e.key === 'ArrowLeft') prevPage();
+  });
+
+  // 初始加载评论区
+  loadGiscus(current);
+</script>
+</body>
+</html>

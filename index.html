@@ -480,7 +480,7 @@
 
     <div class="nav-group open" id="group-ch3">
       <div class="nav-chapter" onclick="toggleGroup('ch3')">
-        第三章 · 子 Agent
+        第三章 · SubAgent
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
@@ -573,7 +573,7 @@
           <li class="toc-chapter" onclick="showPage('ch2')">第二章 · 工具系统——Agent 的手</li>
           <li class="toc-section" onclick="showPage('ch2')">Tool 自我声明 · 工具注册表 · 读并发/写独占 · MCP 等价接入</li>
 
-          <li class="toc-chapter" onclick="showPage('ch3')">第三章 · 子 Agent——递归就是多 Agent</li>
+          <li class="toc-chapter" onclick="showPage('ch3')">第三章 · SubAgent——递归就是多 Agent</li>
           <li class="toc-section" onclick="showPage('ch3')">上下文隔离 · 同步/异步派发 · 三道防线 · Worktree 隔离</li>
 
           <li class="toc-chapter" onclick="showPage('ch4')">第四章 · 协调器模式——星形多 Agent</li>
@@ -662,7 +662,7 @@
           </button>
           <button class="page-nav-btn next" onclick="showPage('ch3')">
             <span class="nav-dir">下一章 →</span>
-            <span class="nav-title">第三章 · 子 Agent</span>
+            <span class="nav-title">第三章 · SubAgent</span>
             <span class="nav-sub">递归就是多 Agent</span>
           </button>
         </div>
@@ -671,9 +671,9 @@
       <!-- ══ 第三章 ══ -->
       <div class="page" id="page-ch3">
         <div class="chapter-eyebrow">第三章</div>
-        <h1>子 Agent——递归就是多 Agent</h1>
+        <h1>SubAgent——递归就是多 Agent</h1>
         <p class="chapter-subtitle">
-          实现目标：主 Agent 能派出子 Agent 并行干活，子 Agent 看不到父 Agent 的历史，结果干净返回。
+          实现目标：主 Agent 能派出 SubAgent 并行干活，SubAgent 看不到父 Agent 的历史，结果干净返回。
         </p>
 
         <h2>3.1 递归就是多 Agent</h2>
@@ -727,7 +727,7 @@
         <div class="page-nav">
           <button class="page-nav-btn" onclick="showPage('ch3')">
             <span class="nav-dir">← 上一章</span>
-            <span class="nav-title">第三章 · 子 Agent</span>
+            <span class="nav-title">第三章 · SubAgent</span>
           </button>
           <button class="page-nav-btn next" onclick="showPage('ch5')">
             <span class="nav-dir">下一章 →</span>
@@ -771,7 +771,7 @@
         <div class="chapter-eyebrow">第六章</div>
         <h1>权限与安全</h1>
         <p class="chapter-subtitle">
-          实现目标：不同场景下工具的使用需要不同级别的授权，子 Agent 不能越权操作。
+          实现目标：不同场景下工具的使用需要不同级别的授权，SubAgent 不能越权操作。
         </p>
 
         <h2>6.1 权限模式</h2>
@@ -874,7 +874,7 @@
     cover: 'Claude Code 设计与实现',
     ch1: '第一章 · Agent 是什么',
     ch2: '第二章 · 工具系统',
-    ch3: '第三章 · 子 Agent',
+    ch3: '第三章 · SubAgent',
     ch4: '第四章 · 协调器模式',
     ch5: '第五章 · Agent 间通信',
     ch6: '第六章 · 权限与安全',

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Claude Code 设计与实现</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   :root {
     --sidebar-width: 280px;
@@ -387,6 +387,50 @@
     margin-bottom: 40px;
   }
 
+  /* 封面架构图 —— 允许突破 720px 内容宽度 */
+  .cover-diagram {
+    position: relative;
+    width: min(1400px, calc(100vw - var(--sidebar-width) - 120px));
+    max-width: none;
+    margin: 8px 0 44px;
+    /* 让图相对于内容左对齐但可向右溢出 */
+    margin-right: calc(-1 * (min(1400px, calc(100vw - var(--sidebar-width) - 120px)) - 100%));
+  }
+  #sidebar.collapsed ~ #main .cover-diagram {
+    width: min(1400px, calc(100vw - 120px));
+    margin-right: calc(-1 * (min(1400px, calc(100vw - 120px)) - 100%));
+  }
+  .cover-diagram .diagram-eyebrow {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: #9A8F7B;
+    margin-bottom: 8px;
+  }
+  .cover-diagram .diagram-frame {
+    background:
+      radial-gradient(1100px 560px at 84% -6%, rgba(190,118,17,.10), transparent 60%),
+      radial-gradient(900px 620px at -8% 60%, rgba(200,52,78,.06), transparent 55%),
+      #F4EAD9;
+    border-radius: 12px;
+    padding: clamp(14px, 2vw, 24px);
+    border: 1px solid #e8ddc4;
+  }
+  .cover-diagram svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-width: 1500px;
+    margin: 0 auto;
+  }
+  @media (max-width: 900px) {
+    .cover-diagram {
+      width: 100%;
+      margin-right: 0;
+    }
+  }
+
   .toc-list {
     list-style: none;
     display: flex;
@@ -448,7 +492,7 @@
     <span>Agent 系统架构源码解析</span>
   </div>
   <nav id="nav">
-    <a class="nav-chapter active" onclick="showPage('cover')">封面</a>
+    <a class="nav-chapter active" onclick="showPage('cover')">Claude Code 架构介绍</a>
 
     <div class="nav-divider"></div>
 
@@ -551,7 +595,7 @@
 <div id="main">
   <div id="toolbar">
     <button class="toolbar-btn" title="目录" onclick="toggleSidebar()">☰</button>
-    <div class="toolbar-title" id="toolbar-title">从零构建 Claude Code</div>
+    <div class="toolbar-title" id="toolbar-title">Claude Code 设计与实现</div>
   </div>
 
   <div id="content-wrap">
@@ -559,12 +603,230 @@
 
       <!-- ══ 封面 ══ -->
       <div class="page active cover" id="page-cover">
-        <div class="cover-badge">源码架构解析</div>
-        <h1>Claude Code 设计与实现</h1>
+        <h1>Claude Code架构介绍</h1>
         <p class="cover-lead">
           基于 Claude Code 真实源码，从产品角度解析七个核心能力层的设计决策，
           读完能真正理解并实现一个同等架构的 Agent 系统。
         </p>
+
+        <!-- 架构示意图 -->
+        <div class="cover-diagram">
+          <div class="diagram-eyebrow">Claude Code · Architecture</div>
+          <div class="diagram-frame">
+            <svg viewBox="0 0 1500 804" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Claude Code 完整架构示意图">
+              <defs>
+                <marker id="ctrl" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#6D45C9"/></marker>
+                <marker id="data" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#0C9486"/></marker>
+                <marker id="loop" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#2563EB"/></marker>
+                <marker id="extm" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#1F8F5F"/></marker>
+                <marker id="appm" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#8A5A2B"/></marker>
+                <style>
+                  .arch-svg text { font-family: 'Inter','Noto Sans SC',system-ui,sans-serif; }
+                  .arch-svg .card{fill:#FFFEFB;stroke-width:1.5}
+                  .arch-svg .ttl{font-weight:700;font-size:17px;fill:#2B2417}
+                  .arch-svg .ttl-sm{font-weight:700;font-size:14.5px;fill:#2B2417}
+                  .arch-svg .sub{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;fill:#9A8F7B;letter-spacing:.01em}
+                  .arch-svg .tag{font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:700;font-size:11px}
+                  .arch-svg .chip{fill:#FFFFFF;stroke-width:1.1}
+                  .arch-svg .chiptxt{font-size:13.5px;font-weight:600;fill:#3A3326}
+                  .arch-svg .panelttl{font-size:12.5px;font-weight:700;fill:#6E6353}
+                  .arch-svg .flowlbl{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;fill:#6E6353}
+                  .arch-svg .codelbl{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#9A8F7B}
+                  .arch-svg .muted{fill:#BDB3A0}
+                </style>
+              </defs>
+              <g class="arch-svg">
+              <!-- ================= LEFT RAIL : cross-cutting ================= -->
+              <rect x="16" y="24" width="184" height="606" rx="12" fill="#FBEEE9" stroke="#C8344E" stroke-opacity=".35" stroke-dasharray="2 4"/>
+              <text x="30" y="46" class="tag" fill="#C8344E">贯穿 L0–L3</text>
+              <text x="30" y="64" class="ttl-sm">横切机制</text>
+              <g>
+                <rect x="28" y="74" width="160" height="34" rx="7" class="chip" stroke="#C8344E" stroke-opacity=".4"/>
+                <text x="108" y="95" class="chiptxt" text-anchor="middle">可观测性 · OTel</text>
+                <rect x="28" y="114" width="160" height="34" rx="7" class="chip" stroke="#C8344E" stroke-opacity=".4"/>
+                <text x="108" y="135" class="chiptxt" text-anchor="middle">人工介入 / 权限</text>
+                <rect x="28" y="154" width="160" height="34" rx="7" class="chip" stroke="#C8344E" stroke-opacity=".4"/>
+                <text x="108" y="175" class="chiptxt" text-anchor="middle">Hooks（27 种事件）</text>
+                <rect x="28" y="194" width="160" height="34" rx="7" class="chip" stroke="#C8344E" stroke-opacity=".4"/>
+                <text x="108" y="215" class="chiptxt" text-anchor="middle">会话持久化</text>
+                <rect x="28" y="234" width="160" height="34" rx="7" class="chip" stroke="#C8344E" stroke-opacity=".4"/>
+                <text x="108" y="255" class="chiptxt" text-anchor="middle">企业策略下发</text>
+                <rect x="28" y="274" width="160" height="34" rx="7" class="chip" stroke="#C8344E" stroke-opacity=".4"/>
+                <text x="108" y="295" class="chiptxt" text-anchor="middle">Feature Flags</text>
+                <rect x="28" y="314" width="160" height="34" rx="7" fill="#FBEEE9" stroke="#C8344E" stroke-opacity=".3" stroke-dasharray="4 3"/>
+                <text x="108" y="335" class="chiptxt muted" text-anchor="middle">评估 Eval ✕</text>
+              </g>
+
+              <g stroke="#C8344E" stroke-opacity=".5" stroke-dasharray="2 3">
+                <line x1="204" y1="82" x2="246" y2="82" marker-end="url(#data)"/>
+                <line x1="204" y1="239" x2="246" y2="239" marker-end="url(#data)"/>
+                <line x1="204" y1="358" x2="246" y2="358" marker-end="url(#data)"/>
+                <line x1="204" y1="530" x2="246" y2="530" marker-end="url(#data)"/>
+                <line x1="204" y1="691" x2="246" y2="691" marker-end="url(#data)"/>
+              </g>
+
+              <!-- ================= RIGHT RAIL : external deps ================= -->
+              <rect x="1296" y="170" width="188" height="460" rx="12" fill="#ECF6F0" stroke="#1F8F5F" stroke-opacity=".35"/>
+              <text x="1310" y="192" class="tag" fill="#1F8F5F">Harness 接出</text>
+              <text x="1310" y="210" class="ttl-sm">外部依赖</text>
+              <g>
+                <rect x="1308" y="220" width="164" height="34" rx="7" class="chip" stroke="#1F8F5F" stroke-opacity=".4"/>
+                <text x="1390" y="241" class="chiptxt" text-anchor="middle">工具 / MCP 服务器</text>
+                <rect x="1308" y="260" width="164" height="34" rx="7" class="chip" stroke="#1F8F5F" stroke-opacity=".4"/>
+                <text x="1390" y="281" class="chiptxt" text-anchor="middle">记忆检索 · 无向量库</text>
+                <rect x="1308" y="300" width="164" height="34" rx="7" class="chip" stroke="#1F8F5F" stroke-opacity=".4"/>
+                <text x="1390" y="321" class="chiptxt" text-anchor="middle">记忆存储 ~/.claude</text>
+                <rect x="1308" y="340" width="164" height="34" rx="7" class="chip" stroke="#1F8F5F" stroke-opacity=".4"/>
+                <text x="1390" y="361" class="chiptxt" text-anchor="middle">云端 / Remote 服务</text>
+                <rect x="1308" y="380" width="164" height="34" rx="7" class="chip" stroke="#1F8F5F" stroke-opacity=".4"/>
+                <text x="1390" y="401" class="chiptxt" text-anchor="middle">模型推理后端</text>
+                <rect x="1308" y="420" width="164" height="34" rx="7" class="chip" stroke="#1F8F5F" stroke-opacity=".4"/>
+                <text x="1390" y="441" class="chiptxt" text-anchor="middle">操作系统沙箱</text>
+              </g>
+
+              <!-- ================= ROW A: L3 orchestration + App entry ================= -->
+              <rect x="250" y="24" width="580" height="116" rx="10" fill="#FFFEFB" stroke="#6D45C9" stroke-width="1.4" stroke-dasharray="5 4"/>
+              <rect x="264" y="36" width="30" height="17" rx="4" fill="#6D45C9" fill-opacity=".12" stroke="#6D45C9"/>
+              <text x="279" y="48" class="tag" fill="#6D45C9" text-anchor="middle">L3</text>
+              <text x="302" y="48" class="ttl">多 Agent 编排（= L2 递归调用自己）</text>
+              <text x="264" y="65" class="sub">不是独立调度层 · 无中央 Orchestrator · 默认路径无需开关</text>
+              <g>
+                <rect x="264" y="74" width="180" height="34" rx="7" class="chip" stroke="#6D45C9" stroke-opacity=".5"/>
+                <text x="354" y="95" class="chiptxt" text-anchor="middle">Fork</text>
+                <rect x="454" y="74" width="180" height="34" rx="7" class="chip" stroke="#6D45C9" stroke-opacity=".5"/>
+                <text x="544" y="95" class="chiptxt" text-anchor="middle">Coordinator</text>
+                <rect x="644" y="74" width="176" height="34" rx="7" class="chip" stroke="#6D45C9" stroke-opacity=".5"/>
+                <text x="732" y="95" class="chiptxt" text-anchor="middle">Team 网状</text>
+              </g>
+              <text x="264" y="122" class="codelbl">query.ts:241 · 子 Agent = 隔离上下文再跑一次 query() · 以上三种拓扑均为实验性功能，默认关闭</text>
+
+              <line x1="864" y1="82" x2="836" y2="82" stroke="#8A5A2B" stroke-width="1.4" marker-end="url(#appm)"/>
+
+              <rect x="870" y="24" width="380" height="116" rx="10" class="card" stroke="#8A5A2B"/>
+              <rect x="884" y="36" width="36" height="17" rx="4" fill="#8A5A2B" fill-opacity=".12" stroke="#8A5A2B"/>
+              <text x="902" y="48" class="tag" fill="#8A5A2B" text-anchor="middle">App</text>
+              <text x="928" y="48" class="ttl">应用入口层</text>
+              <g>
+                <rect x="884" y="78" width="60" height="38" rx="7" class="chip" stroke="#8A5A2B" stroke-opacity=".4"/>
+                <text x="914" y="101" class="chiptxt" text-anchor="middle">CLI</text>
+                <rect x="950" y="78" width="60" height="38" rx="7" class="chip" stroke="#8A5A2B" stroke-opacity=".4"/>
+                <text x="980" y="101" class="chiptxt" text-anchor="middle">TUI</text>
+                <rect x="1016" y="78" width="64" height="38" rx="7" class="chip" stroke="#8A5A2B" stroke-opacity=".4"/>
+                <text x="1048" y="101" class="chiptxt" text-anchor="middle">IDE</text>
+                <rect x="1088" y="78" width="60" height="38" rx="7" class="chip" stroke="#8A5A2B" stroke-opacity=".4"/>
+                <text x="1118" y="101" class="chiptxt" text-anchor="middle">SDK</text>
+                <rect x="1156" y="78" width="74" height="38" rx="7" class="chip" stroke="#8A5A2B" stroke-opacity=".4"/>
+                <text x="1193" y="101" class="chiptxt" text-anchor="middle">Desktop</text>
+              </g>
+
+              <line x1="720" y1="140" x2="720" y2="168" stroke="#6D45C9" stroke-width="1.4" marker-end="url(#ctrl)"/>
+              <line x1="780" y1="168" x2="780" y2="142" stroke="#2563EB" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#loop)"/>
+              <text x="560" y="157" class="flowlbl">Agent/Task 派生 ↓</text>
+              <text x="800" y="157" class="flowlbl" fill="#2563EB">↑ 递归 = 再开一次 query()</text>
+
+              <!-- ================= L2 Harness ================= -->
+              <rect x="250" y="170" width="1000" height="460" rx="14" fill="#F3FBFA" stroke="#0C9486" stroke-width="1.6"/>
+              <rect x="264" y="182" width="30" height="17" rx="4" fill="#0C9486" fill-opacity=".12" stroke="#0C9486"/>
+              <text x="279" y="194" class="tag" fill="#0C9486" text-anchor="middle">L2</text>
+              <text x="302" y="194" class="ttl">Harness 运行时</text>
+              <text x="264" y="211" class="sub">单个 Agent 的执行引擎 · queryLoop 内部真正去执行的部分</text>
+
+              <g>
+                <rect x="266" y="222" width="152" height="34" rx="6" class="chip" stroke="#0C9486" stroke-opacity=".45"/>
+                <text x="342" y="243" class="chiptxt" text-anchor="middle">Loop 控制</text>
+                <rect x="428" y="222" width="152" height="34" rx="6" class="chip" stroke="#0C9486" stroke-opacity=".45"/>
+                <text x="504" y="243" class="chiptxt" text-anchor="middle">Prompt 组装</text>
+                <rect x="590" y="222" width="152" height="34" rx="6" class="chip" stroke="#0C9486" stroke-opacity=".45"/>
+                <text x="666" y="243" class="chiptxt" text-anchor="middle">上下文压缩</text>
+                <rect x="752" y="222" width="152" height="34" rx="6" class="chip" stroke="#0C9486" stroke-opacity=".45"/>
+                <text x="828" y="243" class="chiptxt" text-anchor="middle">Token 预算</text>
+                <rect x="914" y="222" width="152" height="34" rx="6" class="chip" stroke="#0C9486" stroke-opacity=".45"/>
+                <text x="990" y="243" class="chiptxt" text-anchor="middle">记忆预取</text>
+                <rect x="1076" y="222" width="150" height="34" rx="6" class="chip" stroke="#0C9486" stroke-opacity=".45"/>
+                <text x="1151" y="243" class="chiptxt" text-anchor="middle">工具编排</text>
+              </g>
+
+              <path d="M1226,239 C1264,239 1276,300 1296,330" fill="none" stroke="#1F8F5F" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#extm)"/>
+
+              <rect x="264" y="266" width="972" height="66" rx="10" fill="#EFFBF9" stroke="#0C9486" stroke-opacity=".3" stroke-dasharray="3 3"/>
+              <text x="276" y="282" class="panelttl">工具系统 — 内置约 40 个工具 · src/tools/</text>
+              <g>
+                <rect x="276" y="288" width="152" height="34" rx="6" class="chip" stroke="#0C9486" stroke-opacity=".4"/>
+                <text x="352" y="309" class="chiptxt" text-anchor="middle">文件读写</text>
+                <rect x="438" y="288" width="152" height="34" rx="6" class="chip" stroke="#0C9486" stroke-opacity=".4"/>
+                <text x="514" y="309" class="chiptxt" text-anchor="middle">执行环境</text>
+                <rect x="600" y="288" width="152" height="34" rx="6" class="chip" stroke="#0C9486" stroke-opacity=".4"/>
+                <text x="676" y="309" class="chiptxt" text-anchor="middle">网络与检索</text>
+                <rect x="762" y="288" width="152" height="34" rx="6" class="chip" stroke="#0C9486" stroke-opacity=".4"/>
+                <text x="838" y="309" class="chiptxt" text-anchor="middle">任务与协作</text>
+                <rect x="924" y="288" width="152" height="34" rx="6" class="chip" stroke="#0C9486" stroke-opacity=".4"/>
+                <text x="1000" y="309" class="chiptxt" text-anchor="middle">计划与工作区</text>
+                <rect x="1086" y="288" width="140" height="34" rx="6" class="chip" stroke="#0C9486" stroke-opacity=".4"/>
+                <text x="1156" y="309" class="chiptxt" text-anchor="middle">辅助工具</text>
+              </g>
+
+              <rect x="264" y="342" width="972" height="66" rx="10" fill="#FFF8EE" stroke="#B36A00" stroke-opacity=".35" stroke-dasharray="3 3"/>
+              <text x="276" y="358" class="panelttl" fill="#95610A">权限引擎</text>
+              <g>
+                <rect x="276" y="364" width="200" height="34" rx="6" class="chip" stroke="#B36A00" stroke-opacity=".4"/>
+                <text x="376" y="385" class="chiptxt" text-anchor="middle">权限模式</text>
+                <rect x="650" y="364" width="200" height="34" rx="6" class="chip" stroke="#B36A00" stroke-opacity=".4"/>
+                <text x="750" y="385" class="chiptxt" text-anchor="middle">分类器</text>
+                <rect x="1024" y="364" width="200" height="34" rx="6" class="chip" stroke="#B36A00" stroke-opacity=".4"/>
+                <text x="1124" y="385" class="chiptxt" text-anchor="middle">熔断与追踪</text>
+              </g>
+
+              <!-- L1 ReAct triangular loop -->
+              <rect x="380" y="418" width="740" height="182" rx="10" fill="#FFFFFF" stroke="#2563EB" stroke-width="1.4" stroke-dasharray="5 4"/>
+              <rect x="392" y="428" width="30" height="16" rx="4" fill="#2563EB" fill-opacity=".12" stroke="#2563EB"/>
+              <text x="407" y="439" class="tag" fill="#2563EB" text-anchor="middle">L1</text>
+              <text x="430" y="439" class="ttl-sm">ReAct 推理循环</text>
+              <text x="392" y="454" class="sub">认知内核 = while(true)</text>
+
+              <rect x="470" y="464" width="200" height="46" rx="8" fill="#EEF3FF" stroke="#2563EB"/>
+              <text x="570" y="484" class="ttl-sm" text-anchor="middle">Thought 思考</text>
+              <text x="570" y="499" class="sub" text-anchor="middle">下一步做什么</text>
+
+              <rect x="830" y="464" width="200" height="46" rx="8" fill="#EEF3FF" stroke="#2563EB"/>
+              <text x="930" y="484" class="ttl-sm" text-anchor="middle">Action 行动</text>
+              <text x="930" y="499" class="sub" text-anchor="middle">调用工具</text>
+
+              <rect x="640" y="540" width="220" height="46" rx="8" fill="#EEF3FF" stroke="#2563EB"/>
+              <text x="750" y="560" class="ttl-sm" text-anchor="middle">Observation 观察</text>
+              <text x="750" y="575" class="sub" text-anchor="middle">看结果</text>
+
+              <line x1="678" y1="487" x2="822" y2="487" stroke="#2563EB" stroke-width="1.5" marker-end="url(#loop)"/>
+              <line x1="900" y1="510" x2="808" y2="538" stroke="#2563EB" stroke-width="1.5" marker-end="url(#loop)"/>
+              <line x1="700" y1="538" x2="608" y2="510" stroke="#2563EB" stroke-width="1.3" stroke-dasharray="3 3" marker-end="url(#loop)"/>
+              <text x="750" y="451" class="codelbl" text-anchor="middle" fill="#2563EB">↺ Observation → Thought，直到没有 tool_use 为止</text>
+
+              <line x1="720" y1="630" x2="720" y2="658" stroke="#6D45C9" stroke-width="1.4" marker-end="url(#ctrl)"/>
+              <line x1="780" y1="658" x2="780" y2="632" stroke="#0C9486" stroke-width="1.4" marker-end="url(#data)"/>
+              <text x="600" y="647" class="flowlbl">↓ 调用</text>
+              <text x="788" y="647" class="flowlbl" fill="#0C9486">token ↑</text>
+
+              <!-- L0 Model -->
+              <rect x="500" y="660" width="500" height="62" rx="10" class="card" stroke="#BE7611"/>
+              <rect x="514" y="676" width="30" height="17" rx="4" fill="#BE7611" fill-opacity=".14" stroke="#BE7611"/>
+              <text x="529" y="688" class="tag" fill="#BE7611" text-anchor="middle">L0</text>
+              <text x="552" y="688" class="ttl">模型 / LLM</text>
+              <text x="514" y="707" class="sub">Reasoning Core · 工具调用/结构化输出 · Opus · Sonnet · Haiku</text>
+
+              <!-- bottom legend -->
+              <g transform="translate(250,746)">
+                <line x1="0" y1="10" x2="30" y2="10" stroke="#6D45C9" stroke-width="1.4" marker-end="url(#ctrl)"/>
+                <text x="37" y="14" class="flowlbl">控制流·派发/递归（向下）</text>
+                <line x1="255" y1="10" x2="285" y2="10" stroke="#0C9486" stroke-width="1.4" marker-end="url(#data)"/>
+                <text x="292" y="14" class="flowlbl">数据流·结果回流（向上）</text>
+                <line x1="510" y1="10" x2="540" y2="10" stroke="#2563EB" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#loop)"/>
+                <text x="547" y="14" class="flowlbl">ReAct 循环·嵌在 Harness 内</text>
+                <line x1="780" y1="10" x2="810" y2="10" stroke="#1F8F5F" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#extm)"/>
+                <text x="817" y="14" class="flowlbl">外部依赖</text>
+              </g>
+              </g>
+            </svg>
+          </div>
+        </div>
 
         <ul class="toc-list">
           <li class="toc-chapter" onclick="showPage('ch1')">第一章 · Agent 是什么——核心循环</li>
@@ -871,7 +1133,7 @@
 <script>
   const pages = ['cover','ch1','ch2','ch3','ch4','ch5','ch6','ch7','ref'];
   const titles = {
-    cover: 'Claude Code 设计与实现',
+    cover: 'Claude Code架构介绍',
     ch1: '第一章 · Agent 是什么',
     ch2: '第二章 · 工具系统',
     ch3: '第三章 · SubAgent',

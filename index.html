@@ -614,11 +614,11 @@
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showPage('ch1')">1.1 消息列表作为状态载体</a>
-        <a class="nav-section" onclick="showPage('ch1')">1.2 ReAct 框架</a>
-        <a class="nav-section" onclick="showPage('ch1')">1.3 流式响应的逐块处理</a>
-        <a class="nav-section" onclick="showPage('ch1')">1.4 工具调用结果注入</a>
-        <a class="nav-section" onclick="showPage('ch1')">1.5 maxTurns 熔断与退出路径</a>
+        <a class="nav-section" onclick="showSection('ch1','s1-1')">1.1 消息列表作为状态载体</a>
+        <a class="nav-section" onclick="showSection('ch1','s1-2')">1.2 ReAct 框架</a>
+        <a class="nav-section" onclick="showSection('ch1','s1-3')">1.3 流式响应的逐块处理</a>
+        <a class="nav-section" onclick="showSection('ch1','s1-4')">1.4 工具调用结果注入</a>
+        <a class="nav-section" onclick="showSection('ch1','s1-5')">1.5 maxTurns 熔断与退出路径</a>
       </div>
     </div>
 
@@ -1072,7 +1072,7 @@
   <p>彻底搞清楚 Claude Code 的核心循环是怎么跑起来的：State 对象的完整结构、消息列表如何流转、ReAct 框架在源码层面的真实实现、流式响应怎么处理、以及所有退出路径。读完这章，你对 <code>queryLoop()</code> 的每一行都不会再陌生。</p>
 </div>
 
-<h2>1.1 消息列表作为状态载体</h2>
+<h2 id="s1-1">1.1 消息列表作为状态载体</h2>
 
 <p>先从一个根本问题开始：<strong>Agent 的"记忆"存在哪里？</strong></p>
 
@@ -1111,7 +1111,7 @@ state = next  // 下一次迭代从这里读取</code></pre>
 
 <p>还有一个容易被忽视的字段 <code>pendingToolUseSummary</code>：每轮工具执行完毕后，Claude Code 会异步用 Haiku 生成一段"上一轮做了什么"的人类可读摘要，并在下一轮开头 <code>await</code> 这个 Promise。设计意图是让 Haiku 调用（~1秒）与模型流式响应（5-30秒）并行，几乎不增加延迟。</p>
 
-<h2>1.2 ReAct 框架</h2>
+<h2 id="s1-2">1.2 ReAct 框架</h2>
 
 <p>ReAct（Reasoning + Acting）由 Google 2022 年论文提出，是当前主流 Agent 框架的理论基础。其本质只有一句话：<strong>模型的每一步推理结果，都作为下一步行动的输入；每一步行动的结果，都作为下一步推理的输入。</strong>两者交替，直到模型认为任务完成。</p>
 
@@ -1154,7 +1154,7 @@ if (message.type === 'assistant') {
   }
 }</code></pre>
 
-<h2>1.3 流式响应的逐块处理</h2>
+<h2 id="s1-3">1.3 流式响应的逐块处理</h2>
 
 <p>调用模型返回的不是一个完整响应，而是一条 SSE（Server-Sent Events）流。Claude Code 的处理方式是：<strong>每完成一个 content block 就立刻 yield 出去</strong>，而不是等整个 message 结束。</p>
 
@@ -1192,7 +1192,7 @@ for await (const part of stream) {
 
 <p>tool_use 的 <code>input</code> 字段是流式拼接 JSON 字符串，整个 block 接收完毕后才能 <code>JSON.parse</code>。在 <code>content_block_stop</code> 时 Claude Code 会调用 <code>normalizeContentFromAPI</code> 完成这个解析，并把 <code>input</code> 从字符串变为对象。</p>
 
-<h2>1.4 工具调用结果注入</h2>
+<h2 id="s1-4">1.4 工具调用结果注入</h2>
 
 <p>工具执行完毕后，结果以 <code>tool_result</code> block、<strong>user 角色</strong>注入到消息列表。这是 Anthropic API 的协议强制要求：每个 <code>tool_use</code> block 必须有一个同 ID 的 <code>tool_result</code> 与之配对，且必须紧跟在 assistant 消息后面作为下一条 user 消息。</p>
 
@@ -1225,7 +1225,7 @@ for await (const part of stream) {
 
 <p>还有一个关键细节：工具执行支持<strong>并发</strong>——同一轮里多个 <code>tool_use</code> block 可以并发执行（read-only 工具），并发上限由环境变量 <code>CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY</code> 控制（默认 10）。但 write 类工具必须串行。调度逻辑在第三章详细讲。</p>
 
-<h2>1.5 maxTurns 熔断与全部退出路径</h2>
+<h2 id="s1-5">1.5 maxTurns 熔断与全部退出路径</h2>
 
 <p><code>turnCount</code> 从 1 开始，每次有工具调用需要 follow-up 时在循环末尾递增（<code>query.ts:1679</code>）。<strong>turnCount 的语义是：即将向模型发起第几次调用</strong>——初始用户请求是 turn 1，第一次工具调用的 follow-up 是 turn 2，以此类推。</p>
 
@@ -1629,6 +1629,15 @@ while True:                 # while(true)               query.ts:307
 
     loadGiscus(id);
     window.scrollTo(0, 0);
+  }
+
+  function showSection(pageId, anchorId) {
+    showPage(pageId);
+    // 等 DOM 渲染完毕再滚动（revealContent 有 setTimeout，稍微延迟一点）
+    setTimeout(() => {
+      const el = document.getElementById(anchorId);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
   }
 
   // 生成式逐段显示效果

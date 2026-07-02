@@ -1,0 +1,173 @@
+<div class="chapter-eyebrow">第一章</div>
+<h1>Agent Loop（核心循环）</h1>
+
+<div class="goal-card">
+  <div class="goal-card-label">本章目标</div>
+  <p>用户输入一句话，Agent 能调多轮工具，自己决定什么时候停，返回最终结论。读完这章，你能自己实现一个可运行的单 Agent。</p>
+</div>
+
+<h2>1.1 消息列表作为状态载体</h2>
+
+<p>
+  普通函数调用结束就释放状态。Agent 的核心问题是：<strong>多轮对话里，上下文怎么活下去？</strong>
+</p>
+<p>
+  Claude Code 的答案非常简单：一个数组，把所有消息都放进去，每轮追加，下一轮整个传给模型。
+  模型不需要"记忆"——它是无状态的，每次调用都是全新的；记忆在调用方手里。
+</p>
+<p>Claude Code 源码里，这个数组就是 <code>State.messages</code>（<code>query.ts:204</code>）：</p>
+
+<pre><code>// query.ts:204  State 类型
+type State = {
+  messages: Message[]   // ← 唯一的状态载体
+  turnCount: number
+  // ...
+}
+
+// query.ts:1715  每轮末尾，把三类新消息追加后构成下一轮输入
+state.messages = [
+  ...history,          // 之前所有轮次
+  ...assistantMessages, // 本轮模型输出（含 tool_use block）
+  ...toolResults,       // 本轮工具执行结果（tool_result）
+]</code></pre>
+
+<p>
+  三类消息循环追加，构成完整的对话历史。模型每次看到的是"全量上下文"，不是摘要或增量。
+  这样设计的代价是 token 随轮次线性增长——这正是第二章 Harness 要解决的问题（Token 预算与上下文压缩）。
+</p>
+
+<h2>1.2 ReAct 框架</h2>
+
+<p>
+  ReAct（Reasoning + Acting）是驱动 Agent Loop 的核心范式，由 Google 2022 年论文提出。
+  其本质是：<strong>让模型的推理过程和工具调用行为交替进行</strong>，每一步行动的结果都作为下一步推理的输入。
+</p>
+<p>一个完整的 ReAct 循环长这样：</p>
+
+<pre><code>用户消息
+  │
+  ▼
+[Reasoning] 模型推理 ── 输出 text + tool_use block
+  │
+  ▼
+[Acting]    执行工具 ── 得到 tool_result
+  │
+  ▼
+[Reasoning] 再次推理（带上工具结果）── 若还需工具则继续循环
+  │
+  ▼
+[Done]      模型不再输出 tool_use ── stop_reason=end_turn ── 退出</code></pre>
+
+<p>
+  Claude Code 里有一个细节值得注意：循环继续的判断<strong>不靠 <code>stop_reason == 'tool_use'</code></strong>，
+  因为源码注释明确写了这个字段"不总是设置正确"（<code>query.ts:553</code>）。
+  真正的判断是：流式接收过程中有没有解析到 <code>tool_use</code> block，即 <code>needsFollowUp</code> 标志（<code>query.ts:558</code>）。
+</p>
+
+<pre><code>// query.ts:826  发现 tool_use block 时设置标志
+if (block.type === 'tool_use') {
+  toolUseBlocks.push(block)
+  needsFollowUp = true   // ← 循环继续的唯一信号
+}
+
+// 循环末尾判断
+if (!needsFollowUp) {
+  return { reason: 'completed' }  // 退出
+}
+// 否则注入 tool_result，进入下一轮</code></pre>
+
+<h2>1.3 工具调用结果注入</h2>
+
+<p>
+  工具执行完毕后，结果不是直接传给模型——它被包装成 <code>tool_result</code> block，
+  以 <strong>user 角色</strong>追加到消息列表。这是 Anthropic API 的协议要求：
+  模型的 <code>tool_use</code> 必须配对一个同 ID 的 <code>tool_result</code>。
+</p>
+
+<pre><code># 消息列表在一次完整 ReAct 循环后的结构：
+
+[
+  {"role": "user",      "content": "帮我查北京天气"},
+  {"role": "assistant", "content": [
+      {"type": "text",     "text": "我来查一下..."},
+      {"type": "tool_use", "id": "tu_01", "name": "get_weather", "input": {"city": "北京"}}
+  ]},
+  {"role": "user",      "content": [          # ← tool_result 以 user 角色注入
+      {"type": "tool_result", "tool_use_id": "tu_01", "content": "晴，18°C"}
+  ]},
+  {"role": "assistant", "content": [
+      {"type": "text", "text": "北京今天晴天，18°C，适合出行。"}
+  ]}
+]</code></pre>
+
+<p>
+  Claude Code 支持并发执行多个工具（read-only 工具），但 write 工具必须串行——
+  这是工具系统的调度逻辑，第三章详细展开。
+</p>
+
+<h2>1.4 maxTurns 熔断机制</h2>
+
+<p>
+  如果模型陷入循环（不断调工具却没有结论），或者任务天然需要很多步骤，
+  Loop 需要有一个硬上限防止无限运行。
+</p>
+<p>
+  Claude Code 在每轮末尾检查 <code>turnCount</code>，超过 <code>maxTurns</code> 就发出事件并返回（<code>query.ts:1704</code>）：
+</p>
+
+<pre><code>// query.ts:1704
+if (maxTurns && nextTurnCount > maxTurns) {
+  yield { type: 'max_turns_reached', maxTurns, turnCount }
+  return { reason: 'max_turns' }
+}</code></pre>
+
+<p>
+  除 <code>max_turns</code> 外，循环还有以下退出路径：
+</p>
+<ul>
+  <li><code>completed</code> — 模型正常完成（无 tool_use，end_turn）</li>
+  <li><code>aborted_streaming</code> / <code>aborted_tools</code> — 用户中断</li>
+  <li><code>prompt_too_long</code> — 上下文超出模型限制</li>
+  <li><code>model_error</code> — 模型调用异常</li>
+</ul>
+<p>
+  实际使用时，<code>maxTurns</code> 的合理值取决于任务复杂度。Claude Code 默认不设上限（交互模式），
+  非交互脚本模式建议设 10–50。
+</p>
+
+<hr>
+
+<h2>本章代码</h2>
+<p>
+  完整可运行代码在 <code>code/ch01_agent_loop.py</code>，包含完整的 ReAct 循环实现、
+  两个示例工具（calculator、get_weather）和事件流输出。
+</p>
+<pre><code># 运行方式（需要设置 ANTHROPIC_API_KEY）
+cd code
+uv run python ch01_agent_loop.py</code></pre>
+
+<p>核心结构对照：</p>
+<pre><code># ch01_agent_loop.py  →  Claude Code 源码对照
+
+messages = [...]              # State.messages        query.ts:204
+while True:                   # while(true) 主循环    query.ts:307
+    if turn_count > max_turns:  # maxTurns 熔断       query.ts:1704
+        ...
+    response = client.messages.create(...)  # callModel  query.ts:659
+    needs_follow_up = len(tool_use_blocks) > 0  # needsFollowUp  query.ts:558
+    if not needs_follow_up:
+        return {"reason": "completed"}      # 退出      query.ts:1264
+    messages.append(tool_results)           # 注入结果  query.ts:1715
+    turn_count += 1</code></pre>
+
+<div class="page-nav">
+  <button class="page-nav-btn" onclick="showPage('cover')">
+    <span class="nav-dir">← 上一页</span>
+    <span class="nav-title">封面</span>
+  </button>
+  <button class="page-nav-btn next" onclick="showPage('ch2')">
+    <span class="nav-dir">下一章 →</span>
+    <span class="nav-title">第二章 · Harness 运行时</span>
+    <span class="nav-sub">执行引擎</span>
+  </button>
+</div>

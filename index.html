@@ -529,90 +529,104 @@
 
     <div class="nav-group open" id="group-ch1">
       <div class="nav-chapter" onclick="toggleGroup('ch1')">
-        第一章 · Agent 是什么
+        第一章 · Agent Loop
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showPage('ch1')">1.1 消息就是状态</a>
-        <a class="nav-section" onclick="showPage('ch1')">1.2 主循环是一个 Generator</a>
-        <a class="nav-section" onclick="showPage('ch1')">1.3 工具结果注入</a>
-        <a class="nav-section" onclick="showPage('ch1')">1.4 maxTurns 断路器</a>
+        <a class="nav-section" onclick="showPage('ch1')">1.1 消息列表作为状态载体</a>
+        <a class="nav-section" onclick="showPage('ch1')">1.2 ReAct 框架</a>
+        <a class="nav-section" onclick="showPage('ch1')">1.3 工具调用结果注入</a>
+        <a class="nav-section" onclick="showPage('ch1')">1.4 maxTurns 熔断机制</a>
       </div>
     </div>
 
     <div class="nav-group open" id="group-ch2">
       <div class="nav-chapter" onclick="toggleGroup('ch2')">
-        第二章 · 工具系统
+        第二章 · Harness 运行时
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showPage('ch2')">2.1 Tool 自我声明</a>
-        <a class="nav-section" onclick="showPage('ch2')">2.2 工具注册表</a>
-        <a class="nav-section" onclick="showPage('ch2')">2.3 读并发 / 写独占分批</a>
-        <a class="nav-section" onclick="showPage('ch2')">2.4 MCP 工具与内置工具等价</a>
+        <a class="nav-section" onclick="showPage('ch2')">2.1 queryLoop 的职责边界</a>
+        <a class="nav-section" onclick="showPage('ch2')">2.2 Prompt 组装流水线</a>
+        <a class="nav-section" onclick="showPage('ch2')">2.3 Token 预算与 max_tokens 控制</a>
+        <a class="nav-section" onclick="showPage('ch2')">2.4 记忆预取时机</a>
+        <a class="nav-section" onclick="showPage('ch2')">2.5 上下文压缩触发</a>
       </div>
     </div>
 
     <div class="nav-group open" id="group-ch3">
       <div class="nav-chapter" onclick="toggleGroup('ch3')">
-        第三章 · SubAgent
+        第三章 · 工具系统
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showPage('ch3')">3.1 递归就是多 Agent</a>
-        <a class="nav-section" onclick="showPage('ch3')">3.2 上下文隔离的实现</a>
-        <a class="nav-section" onclick="showPage('ch3')">3.3 同步 vs 异步派发</a>
-        <a class="nav-section" onclick="showPage('ch3')">3.4 三道防线防过度拆分</a>
-        <a class="nav-section" onclick="showPage('ch3')">3.5 Worktree 文件系统隔离</a>
+        <a class="nav-section" onclick="showPage('ch3')">3.1 Tool 接口定义</a>
+        <a class="nav-section" onclick="showPage('ch3')">3.2 工具注册表</a>
+        <a class="nav-section" onclick="showPage('ch3')">3.3 读并发与写独占调度</a>
+        <a class="nav-section" onclick="showPage('ch3')">3.4 MCP 工具统一接入</a>
       </div>
     </div>
 
     <div class="nav-group open" id="group-ch4">
       <div class="nav-chapter" onclick="toggleGroup('ch4')">
-        第四章 · 协调器模式
+        第四章 · SubAgent
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showPage('ch4')">4.1 Coordinator 本质是系统 Prompt</a>
-        <a class="nav-section" onclick="showPage('ch4')">4.2 Worker 结果回灌机制</a>
-        <a class="nav-section" onclick="showPage('ch4')">4.3 SendMessage 继续 Worker</a>
-        <a class="nav-section" onclick="showPage('ch4')">4.4 并发管理与任务停止</a>
+        <a class="nav-section" onclick="showPage('ch4')">4.1 SubAgent 派生原理</a>
+        <a class="nav-section" onclick="showPage('ch4')">4.2 上下文隔离机制</a>
+        <a class="nav-section" onclick="showPage('ch4')">4.3 同步与异步派发</a>
+        <a class="nav-section" onclick="showPage('ch4')">4.4 SubAgent 拆分约束</a>
+        <a class="nav-section" onclick="showPage('ch4')">4.5 Worktree 文件系统隔离</a>
       </div>
     </div>
 
     <div class="nav-group open" id="group-ch5">
       <div class="nav-chapter" onclick="toggleGroup('ch5')">
-        第五章 · Agent 间通信
+        第五章 · 协调器模式
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showPage('ch5')">5.1 Mailbox 极简实现</a>
-        <a class="nav-section" onclick="showPage('ch5')">5.2 Agent 寻址</a>
-        <a class="nav-section" onclick="showPage('ch5')">5.3 消息分类与过滤</a>
+        <a class="nav-section" onclick="showPage('ch5')">5.1 Coordinator 角色设计</a>
+        <a class="nav-section" onclick="showPage('ch5')">5.2 Worker 结果聚合</a>
+        <a class="nav-section" onclick="showPage('ch5')">5.3 SendMessage 通信协议</a>
+        <a class="nav-section" onclick="showPage('ch5')">5.4 并发管理与任务终止</a>
       </div>
     </div>
 
     <div class="nav-group open" id="group-ch6">
       <div class="nav-chapter" onclick="toggleGroup('ch6')">
-        第六章 · 权限与安全
+        第六章 · Agent 间通信
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showPage('ch6')">6.1 权限模式</a>
-        <a class="nav-section" onclick="showPage('ch6')">6.2 工具黑白名单</a>
-        <a class="nav-section" onclick="showPage('ch6')">6.3 Abort 信号传播</a>
+        <a class="nav-section" onclick="showPage('ch6')">6.1 Mailbox 架构设计</a>
+        <a class="nav-section" onclick="showPage('ch6')">6.2 Agent 寻址机制</a>
+        <a class="nav-section" onclick="showPage('ch6')">6.3 消息分类与过滤</a>
       </div>
     </div>
 
     <div class="nav-group open" id="group-ch7">
       <div class="nav-chapter" onclick="toggleGroup('ch7')">
-        第七章 · Session 持久化
+        第七章 · 权限与安全
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showPage('ch7')">7.1 Session State 序列化</a>
-        <a class="nav-section" onclick="showPage('ch7')">7.2 恢复机制</a>
-        <a class="nav-section" onclick="showPage('ch7')">7.3 Compact 上下文压缩</a>
+        <a class="nav-section" onclick="showPage('ch7')">7.1 权限模式</a>
+        <a class="nav-section" onclick="showPage('ch7')">7.2 工具许可列表</a>
+        <a class="nav-section" onclick="showPage('ch7')">7.3 中止信号传播</a>
+      </div>
+    </div>
+
+    <div class="nav-group open" id="group-ch8">
+      <div class="nav-chapter" onclick="toggleGroup('ch8')">
+        第八章 · Session 持久化
+        <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="nav-sections">
+        <a class="nav-section" onclick="showPage('ch8')">8.1 Session State 序列化</a>
+        <a class="nav-section" onclick="showPage('ch8')">8.2 恢复机制</a>
+        <a class="nav-section" onclick="showPage('ch8')">8.3 Compact 上下文压缩</a>
       </div>
     </div>
 
@@ -862,26 +876,29 @@
 
         <h2>2. 目录</h2>
         <ul class="toc-list">
-          <li class="toc-chapter" onclick="showPage('ch1')">第一章 · Agent 是什么——核心循环</li>
-          <li class="toc-section" onclick="showPage('ch1')">消息就是状态 · 主循环 Generator · 工具结果注入 · maxTurns 断路器</li>
+          <li class="toc-chapter" onclick="showPage('ch1')">第一章 · Agent Loop（核心循环）</li>
+          <li class="toc-section" onclick="showPage('ch1')">消息列表状态 · ReAct 框架 · 工具调用注入 · maxTurns 熔断</li>
 
-          <li class="toc-chapter" onclick="showPage('ch2')">第二章 · 工具系统——Agent 的手</li>
-          <li class="toc-section" onclick="showPage('ch2')">Tool 自我声明 · 工具注册表 · 读并发/写独占 · MCP 等价接入</li>
+          <li class="toc-chapter" onclick="showPage('ch2')">第二章 · Harness 运行时——执行引擎</li>
+          <li class="toc-section" onclick="showPage('ch2')">queryLoop 边界 · Prompt 组装 · Token 预算 · 记忆预取 · 上下文压缩</li>
 
-          <li class="toc-chapter" onclick="showPage('ch3')">第三章 · SubAgent——递归就是多 Agent</li>
-          <li class="toc-section" onclick="showPage('ch3')">上下文隔离 · 同步/异步派发 · 三道防线 · Worktree 隔离</li>
+          <li class="toc-chapter" onclick="showPage('ch3')">第三章 · 工具系统——Agent 的手</li>
+          <li class="toc-section" onclick="showPage('ch3')">Tool 接口定义 · 工具注册表 · 读并发/写独占调度 · MCP 统一接入</li>
 
-          <li class="toc-chapter" onclick="showPage('ch4')">第四章 · 协调器模式——星形多 Agent</li>
-          <li class="toc-section" onclick="showPage('ch4')">Coordinator 本质 · task-notification 回灌 · SendMessage · 并发管理</li>
+          <li class="toc-chapter" onclick="showPage('ch4')">第四章 · SubAgent——并行隔离执行</li>
+          <li class="toc-section" onclick="showPage('ch4')">派生原理 · 上下文隔离 · 同步/异步派发 · 拆分约束 · Worktree 隔离</li>
 
-          <li class="toc-chapter" onclick="showPage('ch5')">第五章 · Agent 间通信——Mailbox</li>
-          <li class="toc-section" onclick="showPage('ch5')">极简实现 73 行 · Agent 寻址 · 消息分类过滤</li>
+          <li class="toc-chapter" onclick="showPage('ch5')">第五章 · 协调器模式——星形多 Agent</li>
+          <li class="toc-section" onclick="showPage('ch5')">Coordinator 角色设计 · Worker 结果聚合 · SendMessage 协议 · 并发管理</li>
 
-          <li class="toc-chapter" onclick="showPage('ch6')">第六章 · 权限与安全</li>
-          <li class="toc-section" onclick="showPage('ch6')">权限模式 · 工具黑白名单 · Abort 信号传播</li>
+          <li class="toc-chapter" onclick="showPage('ch6')">第六章 · Agent 间通信——Mailbox</li>
+          <li class="toc-section" onclick="showPage('ch6')">架构设计 · Agent 寻址 · 消息分类过滤</li>
 
-          <li class="toc-chapter" onclick="showPage('ch7')">第七章 · Session 持久化与恢复</li>
-          <li class="toc-section" onclick="showPage('ch7')">State 序列化 · 恢复机制 · Compact 压缩</li>
+          <li class="toc-chapter" onclick="showPage('ch7')">第七章 · 权限与安全</li>
+          <li class="toc-section" onclick="showPage('ch7')">权限模式 · 工具许可列表 · 中止信号传播</li>
+
+          <li class="toc-chapter" onclick="showPage('ch8')">第八章 · Session 持久化与恢复</li>
+          <li class="toc-section" onclick="showPage('ch8')">State 序列化 · 恢复机制 · Compact 压缩</li>
 
           <li class="toc-chapter" onclick="showPage('ref')">核心文件速查</li>
         </ul>
@@ -890,13 +907,13 @@
           <div></div>
           <button class="page-nav-btn next" onclick="showPage('ch1')">
             <span class="nav-dir">下一章 →</span>
-            <span class="nav-title">第一章 · Agent 是什么</span>
+            <span class="nav-title">第一章 · Agent Loop</span>
             <span class="nav-sub">核心循环</span>
           </button>
         </div>
       </div>
 
-      <!-- 动态章节容器，内容由 fetch 加载 -->
+      <!-- 动态章节容器，内容由 template 读取 -->
       <div class="page" id="page-chapter" style="display:none"></div>
 
       <!-- 评论区（所有章节共用，切换页面时重新渲染） -->
@@ -909,6 +926,389 @@
   </div><!-- #content-wrap -->
 </div><!-- #main -->
 
+<!-- ══ 章节内容（内联，避免 file:// 协议 fetch 限制）══ -->
+<template id="tpl-ch1">
+<div class="chapter-eyebrow">第一章</div>
+<h1>Agent Loop（核心循环）</h1>
+
+<div class="goal-card">
+  <div class="goal-card-label">本章目标</div>
+  <p>用户输入一句话，Agent 能调多轮工具，自己决定什么时候停，返回最终结论。读完这章，你能自己实现一个可运行的单 Agent。</p>
+</div>
+
+<h2>1.1 消息列表作为状态载体</h2>
+
+<p>
+  普通函数调用结束就释放状态。Agent 的核心问题是：<strong>多轮对话里，上下文怎么活下去？</strong>
+</p>
+<p>
+  Claude Code 的答案非常简单：一个数组，把所有消息都放进去，每轮追加，下一轮整个传给模型。
+  模型不需要"记忆"——它是无状态的，每次调用都是全新的；记忆在调用方手里。
+</p>
+<p>Claude Code 源码里，这个数组就是 <code>State.messages</code>（<code>query.ts:204</code>）：</p>
+
+<pre><code>// query.ts:204  State 类型
+type State = {
+  messages: Message[]   // ← 唯一的状态载体
+  turnCount: number
+  // ...
+}
+
+// query.ts:1715  每轮末尾，把三类新消息追加后构成下一轮输入
+state.messages = [
+  ...history,           // 之前所有轮次
+  ...assistantMessages, // 本轮模型输出（含 tool_use block）
+  ...toolResults,       // 本轮工具执行结果（tool_result）
+]</code></pre>
+
+<p>
+  三类消息循环追加，构成完整的对话历史。模型每次看到的是"全量上下文"，不是摘要或增量。
+  这样设计的代价是 token 随轮次线性增长——这正是第二章 Harness 要解决的问题（Token 预算与上下文压缩）。
+</p>
+
+<h2>1.2 ReAct 框架</h2>
+
+<p>
+  ReAct（Reasoning + Acting）是驱动 Agent Loop 的核心范式，由 Google 2022 年论文提出。
+  其本质是：<strong>让模型的推理过程和工具调用行为交替进行</strong>，每一步行动的结果都作为下一步推理的输入。
+</p>
+<p>一个完整的 ReAct 循环长这样：</p>
+
+<pre><code>用户消息
+  │
+  ▼
+[Reasoning] 模型推理 ── 输出 text + tool_use block
+  │
+  ▼
+[Acting]    执行工具 ── 得到 tool_result
+  │
+  ▼
+[Reasoning] 再次推理（带上工具结果）── 若还需工具则继续循环
+  │
+  ▼
+[Done]      模型不再输出 tool_use ── stop_reason=end_turn ── 退出</code></pre>
+
+<p>
+  Claude Code 里有一个细节值得注意：循环继续的判断<strong>不靠 <code>stop_reason == 'tool_use'</code></strong>，
+  因为源码注释明确写了这个字段"不总是设置正确"（<code>query.ts:553</code>）。
+  真正的判断是：流式接收过程中有没有解析到 <code>tool_use</code> block，即 <code>needsFollowUp</code> 标志（<code>query.ts:558</code>）。
+</p>
+
+<pre><code>// query.ts:826  发现 tool_use block 时设置标志
+if (block.type === 'tool_use') {
+  toolUseBlocks.push(block)
+  needsFollowUp = true   // ← 循环继续的唯一信号
+}
+
+// 循环末尾判断
+if (!needsFollowUp) {
+  return { reason: 'completed' }  // 退出
+}
+// 否则注入 tool_result，进入下一轮</code></pre>
+
+<h2>1.3 工具调用结果注入</h2>
+
+<p>
+  工具执行完毕后，结果不是直接传给模型——它被包装成 <code>tool_result</code> block，
+  以 <strong>user 角色</strong>追加到消息列表。这是 Anthropic API 的协议要求：
+  模型的 <code>tool_use</code> 必须配对一个同 ID 的 <code>tool_result</code>。
+</p>
+
+<pre><code># 消息列表在一次完整 ReAct 循环后的结构：
+
+[
+  {"role": "user",      "content": "帮我查北京天气"},
+  {"role": "assistant", "content": [
+      {"type": "text",     "text": "我来查一下..."},
+      {"type": "tool_use", "id": "tu_01", "name": "get_weather", "input": {"city": "北京"}}
+  ]},
+  {"role": "user",      "content": [        # ← tool_result 以 user 角色注入
+      {"type": "tool_result", "tool_use_id": "tu_01", "content": "晴，18°C"}
+  ]},
+  {"role": "assistant", "content": [
+      {"type": "text", "text": "北京今天晴天，18°C，适合出行。"}
+  ]}
+]</code></pre>
+
+<p>
+  Claude Code 支持并发执行多个工具（read-only 工具），但 write 工具必须串行——
+  这是工具系统的调度逻辑，第三章详细展开。
+</p>
+
+<h2>1.4 maxTurns 熔断机制</h2>
+
+<p>
+  如果模型陷入循环（不断调工具却没有结论），或者任务天然需要很多步骤，
+  Loop 需要有一个硬上限防止无限运行。
+</p>
+<p>
+  Claude Code 在每轮末尾检查 <code>turnCount</code>，超过 <code>maxTurns</code> 就发出事件并返回（<code>query.ts:1704</code>）：
+</p>
+
+<pre><code>// query.ts:1704
+if (maxTurns && nextTurnCount > maxTurns) {
+  yield { type: 'max_turns_reached', maxTurns, turnCount }
+  return { reason: 'max_turns' }
+}</code></pre>
+
+<p>除 <code>max_turns</code> 外，循环还有以下退出路径：</p>
+<ul>
+  <li><code>completed</code> — 模型正常完成（无 tool_use，end_turn）</li>
+  <li><code>aborted_streaming</code> / <code>aborted_tools</code> — 用户中断</li>
+  <li><code>prompt_too_long</code> — 上下文超出模型限制</li>
+  <li><code>model_error</code> — 模型调用异常</li>
+</ul>
+<p>
+  实际使用时，<code>maxTurns</code> 的合理值取决于任务复杂度。Claude Code 默认不设上限（交互模式），
+  非交互脚本模式建议设 10–50。
+</p>
+
+<hr>
+
+<h2>本章代码</h2>
+<p>
+  完整可运行代码在 <code>code/ch01_agent_loop.py</code>，包含完整的 ReAct 循环实现、
+  两个示例工具（calculator、get_weather）和事件流输出。
+</p>
+<pre><code># 运行方式（需要设置 ANTHROPIC_API_KEY）
+cd code
+uv run python ch01_agent_loop.py</code></pre>
+
+<p>核心结构对照：</p>
+<pre><code># ch01_agent_loop.py  →  Claude Code 源码对照
+
+messages = [...]                            # State.messages      query.ts:204
+while True:                                 # while(true) 主循环  query.ts:307
+    if turn_count > max_turns: ...          # maxTurns 熔断       query.ts:1704
+    response = client.messages.create(...) # callModel           query.ts:659
+    needs_follow_up = len(tool_use_blocks) > 0  # needsFollowUp  query.ts:558
+    if not needs_follow_up:
+        return {"reason": "completed"}      # 退出               query.ts:1264
+    messages.append(tool_results)           # 注入结果           query.ts:1715
+    turn_count += 1</code></pre>
+
+<div class="page-nav">
+  <button class="page-nav-btn" onclick="showPage('cover')">
+    <span class="nav-dir">← 上一页</span>
+    <span class="nav-title">封面</span>
+  </button>
+  <button class="page-nav-btn next" onclick="showPage('ch2')">
+    <span class="nav-dir">下一章 →</span>
+    <span class="nav-title">第二章 · Harness 运行时</span>
+    <span class="nav-sub">执行引擎</span>
+  </button>
+</div>
+</template>
+
+<template id="tpl-ch2">
+<div class="chapter-eyebrow">第二章</div>
+<h1>Harness 运行时</h1>
+<p class="chapter-subtitle">
+  实现目标：驱动 Agent Loop 的外层引擎——一次完整 turn 里，Harness 负责组装 Prompt、管理 Token 预算、预取记忆、压缩上下文，并在 Loop 结束后决定是否继续。
+</p>
+<h2>2.1 queryLoop 的职责边界</h2>
+<p>（内容待填）</p>
+<h2>2.2 Prompt 组装流水线</h2>
+<p>（内容待填）</p>
+<h2>2.3 Token 预算与 max_tokens 控制</h2>
+<p>（内容待填）</p>
+<h2>2.4 记忆预取时机</h2>
+<p>（内容待填）</p>
+<h2>2.5 上下文压缩触发</h2>
+<p>（内容待填）</p>
+<div class="page-nav">
+  <button class="page-nav-btn" onclick="showPage('ch1')">
+    <span class="nav-dir">← 上一章</span>
+    <span class="nav-title">第一章 · Agent Loop</span>
+  </button>
+  <button class="page-nav-btn next" onclick="showPage('ch3')">
+    <span class="nav-dir">下一章 →</span>
+    <span class="nav-title">第三章 · 工具系统</span>
+    <span class="nav-sub">Agent 的手</span>
+  </button>
+</div>
+</template>
+
+<template id="tpl-ch3">
+<div class="chapter-eyebrow">第三章</div>
+<h1>工具系统——Agent 的手</h1>
+<p class="chapter-subtitle">
+  实现目标：Agent 能调 Bash、读写文件等多种工具，且读操作并发、写操作串行，互不干扰。
+</p>
+<h2>3.1 Tool 接口定义</h2>
+<p>（内容待填）</p>
+<h2>3.2 工具注册表</h2>
+<p>（内容待填）</p>
+<h2>3.3 读并发与写独占调度</h2>
+<p>（内容待填）</p>
+<h2>3.4 MCP 工具统一接入</h2>
+<p>（内容待填）</p>
+<div class="page-nav">
+  <button class="page-nav-btn" onclick="showPage('ch2')">
+    <span class="nav-dir">← 上一章</span>
+    <span class="nav-title">第二章 · Harness 运行时</span>
+  </button>
+  <button class="page-nav-btn next" onclick="showPage('ch4')">
+    <span class="nav-dir">下一章 →</span>
+    <span class="nav-title">第四章 · SubAgent</span>
+    <span class="nav-sub">并行隔离执行</span>
+  </button>
+</div>
+</template>
+
+<template id="tpl-ch4">
+<div class="chapter-eyebrow">第四章</div>
+<h1>SubAgent——并行隔离执行</h1>
+<p class="chapter-subtitle">
+  实现目标：主 Agent 能派出 SubAgent 并行干活，SubAgent 看不到父 Agent 的历史，结果干净返回。
+</p>
+<h2>4.1 SubAgent 派生原理</h2>
+<p>（内容待填）</p>
+<h2>4.2 上下文隔离机制</h2>
+<p>（内容待填）</p>
+<h2>4.3 同步与异步派发</h2>
+<p>（内容待填）</p>
+<h2>4.4 SubAgent 拆分约束</h2>
+<p>（内容待填）</p>
+<h2>4.5 Worktree 文件系统隔离</h2>
+<p>（内容待填）</p>
+<div class="page-nav">
+  <button class="page-nav-btn" onclick="showPage('ch3')">
+    <span class="nav-dir">← 上一章</span>
+    <span class="nav-title">第三章 · 工具系统</span>
+  </button>
+  <button class="page-nav-btn next" onclick="showPage('ch5')">
+    <span class="nav-dir">下一章 →</span>
+    <span class="nav-title">第五章 · 协调器模式</span>
+    <span class="nav-sub">星形多 Agent</span>
+  </button>
+</div>
+</template>
+
+<template id="tpl-ch5">
+<div class="chapter-eyebrow">第五章</div>
+<h1>协调器模式——星形多 Agent</h1>
+<p class="chapter-subtitle">
+  实现目标：一个 Coordinator 同时管多个 Worker，Worker 异步汇报结果，Coordinator 综合后再派新任务。
+</p>
+<h2>5.1 Coordinator 角色设计</h2>
+<p>（内容待填）</p>
+<h2>5.2 Worker 结果聚合</h2>
+<p>（内容待填）</p>
+<h2>5.3 SendMessage 通信协议</h2>
+<p>（内容待填）</p>
+<h2>5.4 并发管理与任务终止</h2>
+<p>（内容待填）</p>
+<div class="page-nav">
+  <button class="page-nav-btn" onclick="showPage('ch4')">
+    <span class="nav-dir">← 上一章</span>
+    <span class="nav-title">第四章 · SubAgent</span>
+  </button>
+  <button class="page-nav-btn next" onclick="showPage('ch6')">
+    <span class="nav-dir">下一章 →</span>
+    <span class="nav-title">第六章 · Agent 间通信</span>
+    <span class="nav-sub">Mailbox</span>
+  </button>
+</div>
+</template>
+
+<template id="tpl-ch6">
+<div class="chapter-eyebrow">第六章</div>
+<h1>Agent 间通信——Mailbox</h1>
+<p class="chapter-subtitle">
+  实现目标：任意 Agent 可以给另一个 Agent 发消息，接收方可以阻塞等待，也可以非阻塞轮询。
+</p>
+<h2>6.1 Mailbox 架构设计</h2>
+<p>（内容待填）</p>
+<h2>6.2 Agent 寻址机制</h2>
+<p>（内容待填）</p>
+<h2>6.3 消息分类与过滤</h2>
+<p>（内容待填）</p>
+<div class="page-nav">
+  <button class="page-nav-btn" onclick="showPage('ch5')">
+    <span class="nav-dir">← 上一章</span>
+    <span class="nav-title">第五章 · 协调器模式</span>
+  </button>
+  <button class="page-nav-btn next" onclick="showPage('ch7')">
+    <span class="nav-dir">下一章 →</span>
+    <span class="nav-title">第七章 · 权限与安全</span>
+  </button>
+</div>
+</template>
+
+<template id="tpl-ch7">
+<div class="chapter-eyebrow">第七章</div>
+<h1>权限与安全</h1>
+<p class="chapter-subtitle">
+  实现目标：不同场景下工具的使用需要不同级别的授权，SubAgent 不能越权操作。
+</p>
+<h2>7.1 权限模式</h2>
+<p>（内容待填）</p>
+<h2>7.2 工具许可列表</h2>
+<p>（内容待填）</p>
+<h2>7.3 中止信号传播</h2>
+<p>（内容待填）</p>
+<div class="page-nav">
+  <button class="page-nav-btn" onclick="showPage('ch6')">
+    <span class="nav-dir">← 上一章</span>
+    <span class="nav-title">第六章 · Agent 间通信</span>
+  </button>
+  <button class="page-nav-btn next" onclick="showPage('ch8')">
+    <span class="nav-dir">下一章 →</span>
+    <span class="nav-title">第八章 · Session 持久化</span>
+  </button>
+</div>
+</template>
+
+<template id="tpl-ch8">
+<div class="chapter-eyebrow">第八章</div>
+<h1>Session 持久化与恢复</h1>
+<p class="chapter-subtitle">
+  实现目标：进程崩溃或用户中断后，能从上次中断点恢复，不丢失工作进度。
+</p>
+<h2>8.1 Session State 序列化</h2>
+<p>（内容待填）</p>
+<h2>8.2 恢复机制</h2>
+<p>（内容待填）</p>
+<h2>8.3 Compact 上下文压缩</h2>
+<p>（内容待填）</p>
+<div class="page-nav">
+  <button class="page-nav-btn" onclick="showPage('ch7')">
+    <span class="nav-dir">← 上一章</span>
+    <span class="nav-title">第七章 · 权限与安全</span>
+  </button>
+  <button class="page-nav-btn next" onclick="showPage('ref')">
+    <span class="nav-dir">下一页 →</span>
+    <span class="nav-title">核心文件速查</span>
+  </button>
+</div>
+</template>
+
+<template id="tpl-ref">
+<div class="chapter-eyebrow">附录</div>
+<h1>核心文件速查</h1>
+<p class="chapter-subtitle">各章节对应的源码文件与关键函数，配合阅读时直接定位。</p>
+<table>
+  <thead><tr><th>章节</th><th>文件</th><th>关键函数 / 类</th></tr></thead>
+  <tbody>
+    <tr><td>第 1 章</td><td><code>src/query.ts</code></td><td><code>query()</code> / <code>queryLoop()</code></td></tr>
+    <tr><td>第 2 章</td><td><code>src/services/tools/toolOrchestration.ts</code></td><td><code>runTools()</code></td></tr>
+    <tr><td>第 3 章</td><td><code>src/tools/AgentTool/AgentTool.tsx</code></td><td><code>call()</code></td></tr>
+    <tr><td>第 4 章</td><td><code>src/coordinator/coordinatorMode.ts</code></td><td><code>getCoordinatorSystemPrompt()</code></td></tr>
+    <tr><td>第 5 章</td><td><code>src/utils/mailbox.ts</code></td><td><code>Mailbox</code> class</td></tr>
+    <tr><td>第 6 章</td><td><code>src/utils/permissions/</code></td><td><code>canUseTool()</code></td></tr>
+    <tr><td>第 7 章</td><td><code>src/utils/sessionStorage.ts</code></td><td><code>writeAgentMetadata()</code></td></tr>
+  </tbody>
+</table>
+<div class="page-nav">
+  <button class="page-nav-btn" onclick="showPage('ch8')">
+    <span class="nav-dir">← 上一章</span>
+    <span class="nav-title">第八章 · Session 持久化</span>
+  </button>
+  <div></div>
+</div>
+</template>
+
 <!-- Lightbox -->
 <div id="diagram-lightbox" onclick="closeDiagramLightbox()">
   <div class="lb-inner" onclick="event.stopPropagation()" id="lb-inner-content"></div>
@@ -917,17 +1317,18 @@
 <script>
   const titles = {
     cover: 'Claude Code架构介绍',
-    ch1: '第一章 · Agent 是什么',
-    ch2: '第二章 · 工具系统',
-    ch3: '第三章 · SubAgent',
-    ch4: '第四章 · 协调器模式',
-    ch5: '第五章 · Agent 间通信',
-    ch6: '第六章 · 权限与安全',
-    ch7: '第七章 · Session 持久化',
+    ch1: '第一章 · Agent Loop',
+    ch2: '第二章 · Harness 运行时',
+    ch3: '第三章 · 工具系统',
+    ch4: '第四章 · SubAgent',
+    ch5: '第五章 · 协调器模式',
+    ch6: '第六章 · Agent 间通信',
+    ch7: '第七章 · 权限与安全',
+    ch8: '第八章 · Session 持久化',
     ref: '核心文件速查',
   };
 
-  const chapterPages = new Set(['ch1','ch2','ch3','ch4','ch5','ch6','ch7','ref']);
+  const chapterPages = new Set(['ch1','ch2','ch3','ch4','ch5','ch6','ch7','ch8','ref']);
   const noComments = new Set(['cover', 'ref']);
   const cache = {};
   let current = 'cover';
@@ -972,7 +1373,7 @@
     container.appendChild(script);
   }
 
-  async function showPage(id) {
+  function showPage(id) {
     const coverEl = document.getElementById('page-cover');
     const chapterEl = document.getElementById('page-chapter');
 
@@ -983,7 +1384,7 @@
     }
 
     // 展开/折叠侧边栏章节组
-    ['ch1','ch2','ch3','ch4','ch5','ch6','ch7'].forEach(ch => {
+    ['ch1','ch2','ch3','ch4','ch5','ch6','ch7','ch8'].forEach(ch => {
       const g = document.getElementById('group-' + ch);
       if (!g) return;
       if (ch === id) g.classList.add('open');
@@ -1002,26 +1403,42 @@
       coverEl.style.display = 'none';
       coverEl.classList.remove('active');
 
-      // 从缓存或网络加载
+      // 从内联 template 读取（避免 file:// 协议 fetch 限制）
       if (!cache[id]) {
-        chapterEl.innerHTML = '<p style="color:var(--ink3);padding:40px 0">加载中…</p>';
-        chapterEl.style.display = '';
-        chapterEl.classList.add('active');
-        try {
-          const res = await fetch('chapters/' + id + '.html');
-          cache[id] = await res.text();
-        } catch(e) {
-          chapterEl.innerHTML = '<p style="color:#c8344e">加载失败，请检查网络或刷新页面。</p>';
+        const tpl = document.getElementById('tpl-' + id);
+        if (!tpl) {
+          chapterEl.innerHTML = '<p style="color:#c8344e">章节内容未找到。</p>';
+          chapterEl.style.display = '';
+          chapterEl.classList.add('active');
           return;
         }
+        cache[id] = tpl.innerHTML;
       }
       chapterEl.innerHTML = cache[id];
       chapterEl.style.display = '';
       chapterEl.classList.add('active');
+      revealContent(chapterEl);
     }
 
     loadGiscus(id);
     window.scrollTo(0, 0);
+  }
+
+  // 生成式逐段显示效果
+  function revealContent(container) {
+    const blocks = container.querySelectorAll('p, h2, pre, ul, ol, hr, .goal-card, table, .page-nav');
+    blocks.forEach((el, i) => {
+      el.style.opacity = '0';
+      el.style.transform = 'translateY(10px)';
+      el.style.transition = 'none';
+    });
+    blocks.forEach((el, i) => {
+      setTimeout(() => {
+        el.style.transition = 'opacity 0.35s ease, transform 0.35s ease';
+        el.style.opacity = '1';
+        el.style.transform = 'translateY(0)';
+      }, 60 * i);
+    });
   }
 
   function toggleSidebar() {

@@ -6,7 +6,7 @@ Agent Loop 运行示例。
 
 import json
 
-from claude_code_arch.ch01_loop import LoopResult, run_agent_loop
+from claude_code_arch.loop import LoopResult, run_agent_loop
 
 
 def main() -> None:

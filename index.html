@@ -616,8 +616,9 @@
       <div class="nav-sections">
         <a class="nav-section" onclick="showPage('ch1')">1.1 消息列表作为状态载体</a>
         <a class="nav-section" onclick="showPage('ch1')">1.2 ReAct 框架</a>
-        <a class="nav-section" onclick="showPage('ch1')">1.3 工具调用结果注入</a>
-        <a class="nav-section" onclick="showPage('ch1')">1.4 maxTurns 熔断机制</a>
+        <a class="nav-section" onclick="showPage('ch1')">1.3 流式响应的逐块处理</a>
+        <a class="nav-section" onclick="showPage('ch1')">1.4 工具调用结果注入</a>
+        <a class="nav-section" onclick="showPage('ch1')">1.5 maxTurns 熔断与退出路径</a>
       </div>
     </div>
 
@@ -1068,158 +1069,229 @@
 
 <div class="goal-card">
   <div class="goal-card-label">本章目标</div>
-  <p>用户输入一句话，Agent 能调多轮工具，自己决定什么时候停，返回最终结论。读完这章，你能自己实现一个可运行的单 Agent。</p>
+  <p>彻底搞清楚 Claude Code 的核心循环是怎么跑起来的：State 对象的完整结构、消息列表如何流转、ReAct 框架在源码层面的真实实现、流式响应怎么处理、以及所有退出路径。读完这章，你对 <code>queryLoop()</code> 的每一行都不会再陌生。</p>
 </div>
 
 <h2>1.1 消息列表作为状态载体</h2>
 
-<p>
-  普通函数调用结束就释放状态。Agent 的核心问题是：<strong>多轮对话里，上下文怎么活下去？</strong>
-</p>
-<p>
-  Claude Code 的答案非常简单：一个数组，把所有消息都放进去，每轮追加，下一轮整个传给模型。
-  模型不需要"记忆"——它是无状态的，每次调用都是全新的；记忆在调用方手里。
-</p>
-<p>Claude Code 源码里，这个数组就是 <code>State.messages</code>（<code>query.ts:204</code>）：</p>
+<p>先从一个根本问题开始：<strong>Agent 的"记忆"存在哪里？</strong></p>
 
-<pre><code>// query.ts:204  State 类型
+<p>答案出乎意料地简单——一个数组。Claude Code 的整个运行时状态压缩在一个叫 <code>State</code> 的对象里，而这个对象的核心就是 <code>messages: Message[]</code>：</p>
+
+<pre><code>// query.ts:204-217
 type State = {
-  messages: Message[]   // ← 唯一的状态载体
-  turnCount: number
-  // ...
+  messages: Message[]                    // 完整对话历史，唯一状态载体
+  toolUseContext: ToolUseContext          // 工具执行上下文（含 abortController）
+  autoCompactTracking: AutoCompactTrackingState | undefined  // compact 状态追踪
+  maxOutputTokensRecoveryCount: number   // max_output_tokens 恢复次数，上限 3
+  hasAttemptedReactiveCompact: boolean   // 防止 reactive compact 无限循环
+  maxOutputTokensOverride: number | undefined  // 触发升级路径时覆盖 max_tokens
+  pendingToolUseSummary: Promise<...> | undefined  // Haiku 异步生成的工具摘要
+  stopHookActive: boolean | undefined    // stop hook 阻断标志
+  turnCount: number                      // 从 1 开始，每次工具调用后 +1
+  transition: Continue | undefined       // 上一轮为何 continue（测试断言用）
+}</code></pre>
+
+<p>模型本身是无状态的——每次 API 调用都是全新的，不记得上一次说了什么。<strong>记忆完全在调用方手里</strong>，即这个 <code>messages</code> 数组。每轮循环末尾，三类新消息被拼入，构成下一轮的输入：</p>
+
+<pre><code>// query.ts:1715-1716
+const next: State = {
+  messages: [
+    ...messagesForQuery,   // 本轮送入模型的历史（经过 compact/截断处理）
+    ...assistantMessages,  // 本轮模型返回的所有 content block
+    ...toolResults,        // 本轮工具执行结果（以 user 角色注入）
+  ],
+  turnCount: nextTurnCount,
+  transition: { reason: 'next_turn' },
+  // ...其他字段重置
 }
+state = next  // 下一次迭代从这里读取</code></pre>
 
-// query.ts:1715  每轮末尾，把三类新消息追加后构成下一轮输入
-state.messages = [
-  ...history,           // 之前所有轮次
-  ...assistantMessages, // 本轮模型输出（含 tool_use block）
-  ...toolResults,       // 本轮工具执行结果（tool_result）
-]</code></pre>
+<p>注意 <code>messagesForQuery</code> 不等于 <code>state.messages</code>——它是经过一系列预处理之后的版本（compact 截断、工具结果裁剪、微压缩等），这部分在第二章详细讲。这里先记住一个核心事实：<strong>循环内唯一持久化的东西就是 messages 数组，其余的字段每轮基本都会重置。</strong></p>
 
-<p>
-  三类消息循环追加，构成完整的对话历史。模型每次看到的是"全量上下文"，不是摘要或增量。
-  这样设计的代价是 token 随轮次线性增长——这正是第二章 Harness 要解决的问题（Token 预算与上下文压缩）。
-</p>
+<p>还有一个容易被忽视的字段 <code>pendingToolUseSummary</code>：每轮工具执行完毕后，Claude Code 会异步用 Haiku 生成一段"上一轮做了什么"的人类可读摘要，并在下一轮开头 <code>await</code> 这个 Promise。设计意图是让 Haiku 调用（~1秒）与模型流式响应（5-30秒）并行，几乎不增加延迟。</p>
 
 <h2>1.2 ReAct 框架</h2>
 
-<p>
-  ReAct（Reasoning + Acting）是驱动 Agent Loop 的核心范式，由 Google 2022 年论文提出。
-  其本质是：<strong>让模型的推理过程和工具调用行为交替进行</strong>，每一步行动的结果都作为下一步推理的输入。
-</p>
-<p>一个完整的 ReAct 循环长这样：</p>
+<p>ReAct（Reasoning + Acting）由 Google 2022 年论文提出，是当前主流 Agent 框架的理论基础。其本质只有一句话：<strong>模型的每一步推理结果，都作为下一步行动的输入；每一步行动的结果，都作为下一步推理的输入。</strong>两者交替，直到模型认为任务完成。</p>
 
-<pre><code>用户消息
-  │
-  ▼
-[Reasoning] 模型推理 ── 输出 text + tool_use block
-  │
-  ▼
-[Acting]    执行工具 ── 得到 tool_result
-  │
-  ▼
-[Reasoning] 再次推理（带上工具结果）── 若还需工具则继续循环
-  │
-  ▼
-[Done]      模型不再输出 tool_use ── stop_reason=end_turn ── 退出</code></pre>
+<p>Claude Code 的实现是一个 <code>while(true)</code> 循环（<code>query.ts:307</code>），每次迭代对应一个完整的 Reasoning→Acting 周期：</p>
 
-<p>
-  Claude Code 里有一个细节值得注意：循环继续的判断<strong>不靠 <code>stop_reason == 'tool_use'</code></strong>，
-  因为源码注释明确写了这个字段"不总是设置正确"（<code>query.ts:553</code>）。
-  真正的判断是：流式接收过程中有没有解析到 <code>tool_use</code> block，即 <code>needsFollowUp</code> 标志（<code>query.ts:558</code>）。
-</p>
+<pre><code>                    ┌─────────────────────────────────┐
+                    │         while (true)             │
+                    │                                  │
+  用户输入 ──────►  │  1. 预处理 messages               │
+                    │  2. [Reasoning] 调用模型，流式接收  │
+                    │     逐个 content block yield 出去  │
+                    │  3. 解析：有 tool_use block 吗？   │
+                    │     否 → return { reason: 'completed' }  ──► 退出
+                    │     是 → needsFollowUp = true     │
+                    │  4. [Acting] 执行所有工具           │
+                    │  5. 拼装新 State，turnCount++      │
+                    │  6. 检查 maxTurns，到了则退出       │
+                    └──────────────────┬──────────────┘
+                                       │ continue
+                                       └──────────────►（下一轮）</code></pre>
 
-<pre><code>// query.ts:826  发现 tool_use block 时设置标志
-if (block.type === 'tool_use') {
-  toolUseBlocks.push(block)
-  needsFollowUp = true   // ← 循环继续的唯一信号
-}
+<p>这里有一个所有人自己实现时都会踩的坑：<strong>不能用 <code>stop_reason == 'tool_use'</code> 来判断是否要继续循环。</strong> Claude Code 源码的注释明确写道（<code>query.ts:553</code>）：</p>
 
-// 循环末尾判断
-if (!needsFollowUp) {
-  return { reason: 'completed' }  // 退出
-}
-// 否则注入 tool_result，进入下一轮</code></pre>
+<pre><code>// query.ts:553-556
+// Note: stop_reason === 'tool_use' is unreliable -- it's not always set correctly.
+// Set during streaming whenever a tool_use block arrives — the sole
+// loop-exit signal. If false after streaming, we're done (modulo stop-hook retry).</code></pre>
 
-<h2>1.3 工具调用结果注入</h2>
+<p>真正驱动循环继续的唯一信号是 <code>needsFollowUp</code> 标志——它在流式接收过程中，每当解析到一个 <code>tool_use</code> block 时被设为 <code>true</code>（<code>query.ts:826-834</code>）：</p>
 
-<p>
-  工具执行完毕后，结果不是直接传给模型——它被包装成 <code>tool_result</code> block，
-  以 <strong>user 角色</strong>追加到消息列表。这是 Anthropic API 的协议要求：
-  模型的 <code>tool_use</code> 必须配对一个同 ID 的 <code>tool_result</code>。
-</p>
+<pre><code>// query.ts:826-835
+if (message.type === 'assistant') {
+  assistantMessages.push(message)
+  const msgToolUseBlocks = message.message.content.filter(
+    content => content.type === 'tool_use',
+  )
+  if (msgToolUseBlocks.length > 0) {
+    toolUseBlocks.push(...msgToolUseBlocks)
+    needsFollowUp = true   // ← 这是循环继续的唯一判断依据
+  }
+}</code></pre>
 
-<pre><code># 消息列表在一次完整 ReAct 循环后的结构：
+<h2>1.3 流式响应的逐块处理</h2>
+
+<p>调用模型返回的不是一个完整响应，而是一条 SSE（Server-Sent Events）流。Claude Code 的处理方式是：<strong>每完成一个 content block 就立刻 yield 出去</strong>，而不是等整个 message 结束。</p>
+
+<p>内部处理逻辑在 <code>claude.ts</code> 的流式循环里（<code>claude.ts:1940</code>）：</p>
+
+<pre><code>// claude.ts:1940（精简）
+for await (const part of stream) {
+  switch (part.type) {
+    case 'content_block_start':
+      // 根据 type 初始化：tool_use 的 input 初始化为空字符串（JSON 流式拼接用）
+      contentBlocks[part.index] = { ...part.content_block, input: '' }
+      break
+
+    case 'content_block_delta':
+      // 追加增量到对应 block：
+      // input_json_delta → contentBlock.input += delta.partial_json
+      // text_delta       → contentBlock.text  += delta.text
+      break
+
+    case 'content_block_stop':
+      // block 组装完成，立刻构造 AssistantMessage 并 yield
+      // query.ts 收到后立刻 push 到 assistantMessages 并检查 tool_use
+      yield assembledMessage
+      break
+
+    case 'message_delta':
+      // 注意：直接 mutation 最后一条已 yield 消息的 usage/stop_reason
+      // 因为 transcript 序列化队列持有同一对象引用
+      lastMsg.message.stop_reason = part.delta.stop_reason
+      break
+  }
+}</code></pre>
+
+<p><code>message_delta</code> 直接 mutation 已经 yield 出去的对象——这是一个刻意的设计，利用 JavaScript 对象引用语义，让 transcript 写入队列无需等待 stop_reason 到达就能开始序列化，stop_reason 后来更新时自动反映在同一个对象里。</p>
+
+<p>tool_use 的 <code>input</code> 字段是流式拼接 JSON 字符串，整个 block 接收完毕后才能 <code>JSON.parse</code>。在 <code>content_block_stop</code> 时 Claude Code 会调用 <code>normalizeContentFromAPI</code> 完成这个解析，并把 <code>input</code> 从字符串变为对象。</p>
+
+<h2>1.4 工具调用结果注入</h2>
+
+<p>工具执行完毕后，结果以 <code>tool_result</code> block、<strong>user 角色</strong>注入到消息列表。这是 Anthropic API 的协议强制要求：每个 <code>tool_use</code> block 必须有一个同 ID 的 <code>tool_result</code> 与之配对，且必须紧跟在 assistant 消息后面作为下一条 user 消息。</p>
+
+<pre><code># 一次完整 ReAct 循环后，messages 数组的真实形态：
 
 [
-  {"role": "user",      "content": "帮我查北京天气"},
+  # turn 1 ── 用户请求
+  {"role": "user", "content": "帮我查北京和上海的天气，然后比较一下"},
+
+  # turn 1 ── 模型推理，同时发起两个工具调用
   {"role": "assistant", "content": [
-      {"type": "text",     "text": "我来查一下..."},
-      {"type": "tool_use", "id": "tu_01", "name": "get_weather", "input": {"city": "北京"}}
+    {"type": "text",     "text": "我来同时查询两个城市的天气..."},
+    {"type": "tool_use", "id": "tu_01", "name": "get_weather", "input": {"city": "北京"}},
+    {"type": "tool_use", "id": "tu_02", "name": "get_weather", "input": {"city": "上海"}}
   ]},
-  {"role": "user",      "content": [        # ← tool_result 以 user 角色注入
-      {"type": "tool_result", "tool_use_id": "tu_01", "content": "晴，18°C"}
+
+  # turn 1 ── 两个工具结果以 user 角色注入（可以在同一条消息里）
+  {"role": "user", "content": [
+    {"type": "tool_result", "tool_use_id": "tu_01", "content": "晴，18°C"},
+    {"type": "tool_result", "tool_use_id": "tu_02", "content": "多云，22°C"}
   ]},
+
+  # turn 2 ── 模型基于工具结果给出最终回答
   {"role": "assistant", "content": [
-      {"type": "text", "text": "北京今天晴天，18°C，适合出行。"}
+    {"type": "text", "text": "北京晴天18°C，上海多云22°C，上海更暖..."}
   ]}
 ]</code></pre>
 
-<p>
-  Claude Code 支持并发执行多个工具（read-only 工具），但 write 工具必须串行——
-  这是工具系统的调度逻辑，第三章详细展开。
-</p>
+<p>注入之前，<code>toolResults</code> 需要经过 <code>normalizeMessagesForAPI</code> 处理（<code>query.ts:1389</code>）。这个函数做的事情很多：过滤掉 virtual message、合并连续 user 消息（Bedrock 兼容性要求）、清理大媒体 block、剥离内部字段等。这是消息从 Claude Code 内部格式转换为 API wire 格式的关键一步。</p>
 
-<h2>1.4 maxTurns 熔断机制</h2>
+<p>还有一个关键细节：工具执行支持<strong>并发</strong>——同一轮里多个 <code>tool_use</code> block 可以并发执行（read-only 工具），并发上限由环境变量 <code>CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY</code> 控制（默认 10）。但 write 类工具必须串行。调度逻辑在第三章详细讲。</p>
 
-<p>
-  如果模型陷入循环（不断调工具却没有结论），或者任务天然需要很多步骤，
-  Loop 需要有一个硬上限防止无限运行。
-</p>
-<p>
-  Claude Code 在每轮末尾检查 <code>turnCount</code>，超过 <code>maxTurns</code> 就发出事件并返回（<code>query.ts:1704</code>）：
-</p>
+<h2>1.5 maxTurns 熔断与全部退出路径</h2>
 
-<pre><code>// query.ts:1704
+<p><code>turnCount</code> 从 1 开始，每次有工具调用需要 follow-up 时在循环末尾递增（<code>query.ts:1679</code>）。<strong>turnCount 的语义是：即将向模型发起第几次调用</strong>——初始用户请求是 turn 1，第一次工具调用的 follow-up 是 turn 2，以此类推。</p>
+
+<pre><code>// query.ts:1679, 1704-1712
+const nextTurnCount = turnCount + 1
+
 if (maxTurns && nextTurnCount > maxTurns) {
-  yield { type: 'max_turns_reached', maxTurns, turnCount }
-  return { reason: 'max_turns' }
+  yield createAttachmentMessage({ type: 'max_turns_reached', maxTurns })
+  return { reason: 'max_turns', turnCount: nextTurnCount }
 }</code></pre>
 
-<p>除 <code>max_turns</code> 外，循环还有以下退出路径：</p>
-<ul>
-  <li><code>completed</code> — 模型正常完成（无 tool_use，end_turn）</li>
-  <li><code>aborted_streaming</code> / <code>aborted_tools</code> — 用户中断</li>
-  <li><code>prompt_too_long</code> — 上下文超出模型限制</li>
-  <li><code>model_error</code> — 模型调用异常</li>
-</ul>
-<p>
-  实际使用时，<code>maxTurns</code> 的合理值取决于任务复杂度。Claude Code 默认不设上限（交互模式），
-  非交互脚本模式建议设 10–50。
-</p>
+<p>所有退出路径（Terminal reason）汇总：</p>
+
+<table>
+  <thead><tr><th>reason</th><th>行号</th><th>触发条件</th></tr></thead>
+  <tbody>
+    <tr><td><code>completed</code></td><td>1357</td><td>模型正常完成：无 tool_use block，needsFollowUp = false</td></tr>
+    <tr><td><code>max_turns</code></td><td>1711</td><td>nextTurnCount 超过 maxTurns 上限</td></tr>
+    <tr><td><code>blocking_limit</code></td><td>646</td><td>token 总量超过硬性阻断上限（autocompact 关闭时触发）</td></tr>
+    <tr><td><code>aborted_streaming</code></td><td>1051</td><td>模型流式响应过程中用户中断（Ctrl+C）</td></tr>
+    <tr><td><code>aborted_tools</code></td><td>1515</td><td>工具执行过程中用户中断</td></tr>
+    <tr><td><code>hook_stopped</code></td><td>1520</td><td>工具结果中包含 hook_stopped_continuation 附件</td></tr>
+    <tr><td><code>stop_hook_prevented</code></td><td>1279</td><td>stop hook 显式返回 preventContinuation: true</td></tr>
+    <tr><td><code>prompt_too_long</code></td><td>1175</td><td>上下文过长且所有恢复路径（collapse drain + reactive compact）耗尽</td></tr>
+    <tr><td><code>model_error</code></td><td>996</td><td>callModel 抛出非 FallbackTriggered 的异常</td></tr>
+    <tr><td><code>image_error</code></td><td>977</td><td>图片尺寸/处理错误，或 reactive compact 后媒体错误仍在</td></tr>
+  </tbody>
+</table>
+
+<p>除此之外还有 7 种 <strong>Continue transition</strong>——循环继续而不退出的内部分支，包括 <code>max_output_tokens_escalate</code>（从 8k 升级到 64k max_tokens 重试）、<code>reactive_compact_retry</code>（上下文超限时紧急压缩后重试）、<code>stop_hook_blocking</code>（stop hook 注入 blocking error 后重新提问）等。这些恢复机制是第二章 Harness 的核心内容。</p>
 
 <hr>
 
 <h2>本章代码</h2>
-<p>
-  完整可运行代码在 <code>code/ch01_agent_loop.py</code>，包含完整的 ReAct 循环实现、
-  两个示例工具（calculator、get_weather）和事件流输出。
-</p>
-<pre><code># 运行方式（需要设置 ANTHROPIC_API_KEY）
+
+<p>完整实现在 <code>code/examples/loop_demo.py</code>，对照本章讲的每个机制逐一实现：State 对象、ReAct 循环、流式响应处理、tool_result 注入、maxTurns 熔断。</p>
+
+<pre><code># 运行（需要设置 ANTHROPIC_API_KEY）
 cd code
-uv run python ch01_agent_loop.py</code></pre>
+uv run python examples/loop_demo.py</code></pre>
 
-<p>核心结构对照：</p>
-<pre><code># ch01_agent_loop.py  →  Claude Code 源码对照
+<p>核心结构与源码的对应关系：</p>
 
-messages = [...]                            # State.messages      query.ts:204
-while True:                                 # while(true) 主循环  query.ts:307
-    if turn_count > max_turns: ...          # maxTurns 熔断       query.ts:1704
-    response = client.messages.create(...) # callModel           query.ts:659
-    needs_follow_up = len(tool_use_blocks) > 0  # needsFollowUp  query.ts:558
+<pre><code># claude_code_arch/loop/agent_loop.py  ←→  src/query.ts
+
+@dataclass
+class LoopResult:           # Terminal 类型              query.ts:返回值类型
+    reason: str             # completed/max_turns/...   query.ts:各 return 语句
+    turn_count: int
+
+messages = [...]            # State.messages             query.ts:204
+turn_count = 1              # turnCount 从 1 开始         query.ts:278
+
+while True:                 # while(true)               query.ts:307
+    if turn > max_turns:    # maxTurns 熔断              query.ts:1704
+        return LoopResult("max_turns", ...)
+
+    response = client.messages.create(...)   # callModel  query.ts:659
+    # 流式接收：逐 block yield 事件           # content_block_stop  claude.ts
+    # needsFollowUp = 有没有 tool_use block  # query.ts:558/826
+
     if not needs_follow_up:
-        return {"reason": "completed"}      # 退出               query.ts:1264
-    messages.append(tool_results)           # 注入结果           query.ts:1715
+        return LoopResult("completed", ...)  # query.ts:1357
+
+    # 执行工具，收集 tool_result             # runTools()  query.ts:1380
+    messages.append(tool_results)            # 三部分拼接  query.ts:1715
     turn_count += 1</code></pre>
 
 <div class="page-nav">

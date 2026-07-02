@@ -3,162 +3,538 @@
 
 <div class="goal-card">
   <div class="goal-card-label">本章目标</div>
-  <p>用户输入一句话，Agent 能调多轮工具，自己决定什么时候停，返回最终结论。读完这章，你能自己实现一个可运行的单 Agent。</p>
+  <p>把一句"用户请求"变成"能自己调工具、自己判断何时收工、最后给出结论"的 Agent。读完这章，你会掌握所有 Agent 系统最底层、也最不可省略的那个结构——<strong>循环</strong>，并能对照 Claude Code 真实源码写出一个可运行的单 Agent。</p>
 </div>
 
-<h2>1.1 消息列表作为状态载体</h2>
+<p>在拆源码之前，先建立一个贯穿全书的心智模型。很多人以为 Agent 是某种神秘的"会自己思考的程序"，但当你看进 Claude Code 的核心，会发现它朴素得惊人：</p>
 
-<p>
-  普通函数调用结束就释放状态。Agent 的核心问题是：<strong>多轮对话里，上下文怎么活下去？</strong>
-</p>
-<p>
-  Claude Code 的答案非常简单：一个数组，把所有消息都放进去，每轮追加，下一轮整个传给模型。
-  模型不需要"记忆"——它是无状态的，每次调用都是全新的；记忆在调用方手里。
-</p>
-<p>Claude Code 源码里，这个数组就是 <code>State.messages</code>（<code>query.ts:204</code>）：</p>
+<div class="insight">
+  <div class="insight-label">核心心智模型</div>
+  <p>一个 <strong>Agent 就是「一个 while 循环 + 一个消息数组」</strong>。循环每转一圈，就问一次模型"下一步做什么"；模型要么调用工具（循环继续），要么给出答案（循环结束）。所谓"智能"，是模型贡献的；Claude Code 这套工程代码的职责，只是<strong>把这个循环安全、可靠、可中断地转起来</strong>。</p>
+</div>
 
-<pre><code>// query.ts:204  State 类型
+<p>下面这张图就是这句话的动画版——<strong>点「下一步」</strong>，跟着走完一个完整的两轮对话，看左边的控制流怎么循环、右边的 <code>messages[]</code> 怎么逐轮长大。本章接下来的每一节，都是在拆解这张图里的某一步。</p>
+
+<div class="figure ch1-player" data-step="0">
+  <div class="figure-head">
+    <span class="figure-tag">交互 · 可点击</span>
+    <span class="figure-title">ReAct 循环播放器 <span class="hint">— 走完一次「调工具 → 出答案」的完整循环</span></span>
+  </div>
+  <svg viewBox="0 0 720 400" role="img" aria-label="ReAct 循环交互图">
+    <style>
+      .f1 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f1 .nbox{fill:#fffefb;stroke:#d9d3c7;stroke-width:1.4}
+      .f1 .ntxt{font-size:14px;font-weight:600;fill:#3a3326}
+      .f1 .nsub{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;fill:#9a8f7b}
+      .f1 .lbl{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;fill:#6e6353}
+      .f1 .flow{stroke:#c3bcae;stroke-width:1.6;fill:none}
+      .f1 .msgttl{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;fill:#9a8f7b;letter-spacing:.04em}
+      .f1 .mtxt{font-size:12px;font-weight:600;fill:#fff}
+      .f1 .mtag{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;fill:#fff;opacity:.85}
+    </style>
+    <defs><marker id="ch1arrow" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#c3bcae"/></marker></defs>
+    <g class="f1">
+      <rect x="76" y="20" width="196" height="34" rx="17" fill="#2563EB"/>
+      <text x="174" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">用户输入</text>
+      <line class="flow" x1="174" y1="54" x2="174" y2="90" marker-end="url(#ch1arrow)"/>
+
+      <rect x="24" y="72" width="300" height="304" rx="14" fill="none" stroke="#6D45C9" stroke-width="1.4" stroke-dasharray="5 4" opacity=".5"/>
+      <text x="36" y="90" class="lbl" fill="#6D45C9">while (true)</text>
+
+      <g class="ch1-node" id="ch1-n-model">
+        <rect class="nbox" x="76" y="98" width="196" height="48" rx="10"/>
+        <text class="ntxt" x="174" y="119" text-anchor="middle">调用模型 · Thought</text>
+        <text class="nsub" x="174" y="135" text-anchor="middle">流式接收 · 逐块解析</text>
+      </g>
+      <line class="flow" x1="174" y1="146" x2="174" y2="168" marker-end="url(#ch1arrow)"/>
+
+      <g class="ch1-node" id="ch1-n-decide">
+        <rect class="nbox" x="94" y="170" width="160" height="44" rx="10"/>
+        <text class="ntxt" x="174" y="197" text-anchor="middle">有 tool_use？</text>
+      </g>
+      <line class="flow" x1="174" y1="214" x2="174" y2="240" marker-end="url(#ch1arrow)"/>
+      <text x="182" y="234" class="lbl" fill="#1F8F5F">是 ↓</text>
+
+      <g class="ch1-node" id="ch1-n-act">
+        <rect class="nbox" x="76" y="242" width="196" height="44" rx="10"/>
+        <text class="ntxt" x="174" y="269" text-anchor="middle">执行工具 · Action</text>
+      </g>
+      <line class="flow" x1="174" y1="286" x2="174" y2="310" marker-end="url(#ch1arrow)"/>
+
+      <g class="ch1-node" id="ch1-n-obs">
+        <rect class="nbox" x="66" y="312" width="216" height="46" rx="10"/>
+        <text class="ntxt" x="174" y="333" text-anchor="middle">注入 tool_result</text>
+        <text class="nsub" x="174" y="349" text-anchor="middle">Observation · user 角色</text>
+      </g>
+      <path class="flow" d="M66,335 C 40,335 34,318 34,248 L34,130 C34,122 40,121 76,122" marker-end="url(#ch1arrow)"/>
+      <text x="20" y="238" class="lbl" transform="rotate(-90 20 238)" fill="#6D45C9">continue ⟳</text>
+
+      <path class="flow" d="M254,192 L348,192" marker-end="url(#ch1arrow)"/>
+      <text x="300" y="184" text-anchor="middle" class="lbl" fill="#C77D2B">否</text>
+      <g class="ch1-node" id="ch1-n-done">
+        <rect class="nbox" x="348" y="170" width="150" height="44" rx="10" style="stroke:#1F8F5F"/>
+        <text class="ntxt" x="423" y="197" text-anchor="middle" fill="#1F8F5F">return completed</text>
+      </g>
+
+      <text x="520" y="40" class="msgttl">messages[]  ↓ 逐轮追加</text>
+      <g class="ch1-msg" id="ch1-msg-0">
+        <rect x="520" y="52" width="176" height="42" rx="9" fill="#2563EB"/>
+        <text class="mtag" x="532" y="70">role: user</text>
+        <text class="mtxt" x="532" y="86">查询请求</text>
+      </g>
+      <g class="ch1-msg" id="ch1-msg-1">
+        <rect x="520" y="100" width="176" height="42" rx="9" fill="#6D45C9"/>
+        <text class="mtag" x="532" y="118">role: assistant</text>
+        <text class="mtxt" x="532" y="134">text + tool_use</text>
+      </g>
+      <g class="ch1-msg" id="ch1-msg-2">
+        <rect x="520" y="148" width="176" height="42" rx="9" fill="#1F8F5F"/>
+        <text class="mtag" x="532" y="166">role: user</text>
+        <text class="mtxt" x="532" y="182">tool_result</text>
+      </g>
+      <g class="ch1-msg" id="ch1-msg-3">
+        <rect x="520" y="196" width="176" height="42" rx="9" fill="#6D45C9"/>
+        <text class="mtag" x="532" y="214">role: assistant</text>
+        <text class="mtxt" x="532" y="230">最终答案</text>
+      </g>
+    </g>
+  </svg>
+  <div class="figure-cap">初始状态：用户输入进入，messages = [ user ]。循环即将开始。</div>
+  <div class="figure-ctl">
+    <span class="figure-badge">START</span>
+    <button class="figure-btn" onclick="ch1Next(this)">下一步 ▶</button>
+    <button class="figure-btn ghost" onclick="ch1Reset(this)">⟲ 重置</button>
+    <span class="figure-progress">1 / 8</span>
+  </div>
+</div>
+
+<p>本章的五个小节，就是把这句话拆成五个必须回答的工程问题：状态存在哪（1.1）、循环按什么范式转（1.2）、模型的输出怎么实时接住（1.3）、工具结果怎么还给模型（1.4）、循环怎么安全地停下来（1.5）。</p>
+
+<h2 id="s1-1">1.1 消息列表作为状态载体</h2>
+
+<p>先问第一个根本问题：<strong>Agent 的"记忆"存在哪里？</strong></p>
+
+<p>这个问题之所以关键，是因为大模型有一个反直觉的特性——<strong>它是无状态的</strong>。每次调 API 都是一次全新的、互不相识的请求，模型不会"记得"上一轮你们聊了什么。那多轮对话里的上下文靠什么活下去？</p>
+
+<p>Claude Code 的答案朴素到近乎粗暴：<strong>用一个数组把所有说过的话都存起来，每轮结束追加新内容，下一轮把整个数组重新丢给模型。</strong>记忆不在模型里，而在调用方手里。这个数组，就是源码中 <code>State</code> 对象的 <code>messages</code> 字段（<code>query.ts:205</code>）：</p>
+
+<pre><code>// query.ts:205
 type State = {
-  messages: Message[]   // ← 唯一的状态载体
-  turnCount: number
-  // ...
+  messages: Message[]   // ← 完整对话历史，Agent 唯一真正持久的状态
+  turnCount: number     // 轮次计数（1.5 节讲）
+  // ...还有 8 个字段，全是"恢复机制"的账本，下面解释
+}</code></pre>
+
+<p>初学者读源码时最容易被 <code>State</code> 里那一堆字段吓退。这里给一个减负的读法：<strong>这 10 个字段里，只有 <code>messages</code> 是"业务状态"，其余 9 个几乎全是"恢复用的临时账本"</strong>——记录"上一轮为什么要重试""compact 压缩到哪了""max_tokens 恢复过几次"。它们每轮基本都会重置，属于第二章 Harness 的话题。第一章你只需盯住 <code>messages</code> 这一个字段。</p>
+
+<p>循环每转完一圈，末尾把三类新消息拼进数组，构成下一轮的输入（<code>query.ts:1716</code>）：</p>
+
+<pre><code>// query.ts:1715-1716
+const next: State = {
+  messages: [
+    ...messagesForQuery,   // ① 本轮送入模型的历史
+    ...assistantMessages,  // ② 本轮模型返回的内容（含 tool_use）
+    ...toolResults,        // ③ 本轮工具执行结果（以 user 角色注入）
+  ],
+  turnCount: nextTurnCount,
+  // ...其余字段重置
 }
+state = next   // 下一轮迭代从这里读</code></pre>
 
-// query.ts:1715  每轮末尾，把三类新消息追加后构成下一轮输入
-state.messages = [
-  ...history,          // 之前所有轮次
-  ...assistantMessages, // 本轮模型输出（含 tool_use block）
-  ...toolResults,       // 本轮工具执行结果（tool_result）
-]</code></pre>
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">数据流 · 悬停高亮</span>
+    <span class="figure-title">下一轮 messages = 三段拼接 <span class="hint">— 对照上面 query.ts:1716</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 250" role="img" aria-label="三段消息拼接示意图">
+    <style>
+      .f2 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f2 .bt{font-size:13px;font-weight:700}
+      .f2 .bc{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;fill:#8a8172}
+      .f2 .bd{font-size:11.5px;fill:#5a5346}
+      .f2 .plus{font-size:26px;font-weight:300;fill:#b7ad9c}
+      .f2 .bin{transition:transform .18s ease}
+      .f2 .fig-hoverable:hover .bin{transform:translateY(-3px)}
+    </style>
+    <defs><marker id="f2a" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#c3bcae"/></marker></defs>
+    <g class="f2">
+      <g class="fig-hoverable"><g class="bin">
+        <rect x="14" y="20" width="210" height="72" rx="10" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".55"/>
+        <text class="bt" x="30" y="45" fill="#2563EB">messagesForQuery</text>
+        <text class="bc" x="30" y="62">…之前所有轮次</text>
+        <text class="bd" x="30" y="80">经压缩 / 截断后的历史</text>
+      </g></g>
+      <text class="plus" x="240" y="66" text-anchor="middle">+</text>
+      <g class="fig-hoverable"><g class="bin">
+        <rect x="256" y="20" width="210" height="72" rx="10" fill="#F1ECFB" stroke="#6D45C9" stroke-opacity=".55"/>
+        <text class="bt" x="272" y="45" fill="#6D45C9">assistantMessages</text>
+        <text class="bc" x="272" y="62">…本轮模型输出</text>
+        <text class="bd" x="272" y="80">含 text 与 tool_use block</text>
+      </g></g>
+      <text class="plus" x="482" y="66" text-anchor="middle">+</text>
+      <g class="fig-hoverable"><g class="bin">
+        <rect x="498" y="20" width="210" height="72" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".55"/>
+        <text class="bt" x="514" y="45" fill="#1F8F5F">toolResults</text>
+        <text class="bc" x="514" y="62">…本轮工具结果</text>
+        <text class="bd" x="514" y="80">tool_result · user 角色</text>
+      </g></g>
 
-<p>
-  三类消息循环追加，构成完整的对话历史。模型每次看到的是"全量上下文"，不是摘要或增量。
-  这样设计的代价是 token 随轮次线性增长——这正是第二章 Harness 要解决的问题（Token 预算与上下文压缩）。
-</p>
+      <path d="M119,96 L119,128 M361,96 L361,128 M603,96 L603,128" stroke="#c3bcae" stroke-width="1.4" fill="none"/>
+      <path d="M119,128 L361,128 M603,128 L361,128" stroke="#c3bcae" stroke-width="1.4" fill="none"/>
+      <path d="M361,128 L361,150" stroke="#c3bcae" stroke-width="1.4" fill="none" marker-end="url(#f2a)"/>
 
-<h2>1.2 ReAct 框架</h2>
+      <rect x="14" y="156" width="694" height="72" rx="10" fill="#fffefb" stroke="#d9d3c7" stroke-width="1.4"/>
+      <text x="30" y="180" font-size="12" font-weight="700" fill="#3a3326">下一轮 state.messages</text>
+      <rect x="30" y="190" width="150" height="26" rx="6" fill="#2563EB" opacity=".85"/><text x="105" y="207" text-anchor="middle" font-size="11" font-weight="600" fill="#fff">历史…</text>
+      <rect x="188" y="190" width="220" height="26" rx="6" fill="#6D45C9" opacity=".85"/><text x="298" y="207" text-anchor="middle" font-size="11" font-weight="600" fill="#fff">assistant（含 tool_use）</text>
+      <rect x="416" y="190" width="180" height="26" rx="6" fill="#1F8F5F" opacity=".85"/><text x="506" y="207" text-anchor="middle" font-size="11" font-weight="600" fill="#fff">tool_result</text>
+      <text x="678" y="208" text-anchor="end" class="bc" fill="#b7ad9c">→ 再喂给模型</text>
+    </g>
+  </svg>
+  <div class="figure-cap">每轮循环末尾，三段消息按 <code>[...历史, ...模型输出, ...工具结果]</code> 拼成新数组——这就是 Agent「记忆」增长的全部机制。</div>
+</div>
 
-<p>
-  ReAct（Reasoning + Acting）是驱动 Agent Loop 的核心范式，由 Google 2022 年论文提出。
-  其本质是：<strong>让模型的推理过程和工具调用行为交替进行</strong>，每一步行动的结果都作为下一步推理的输入。
-</p>
-<p>一个完整的 ReAct 循环长这样：</p>
+<p>一个容易被忽视、但很能说明设计意图的细节：拼进去的是 <code>messagesForQuery</code>，<strong>不是</strong> <code>state.messages</code> 原样。<code>messagesForQuery</code> 是原始历史经过预处理（压缩、截断、裁剪超大工具结果）之后的版本。这意味着——<strong>"完整历史"和"真正喂给模型的历史"是两回事</strong>。第一章我们默认它们相等，把它当"全量追加"来理解；第二章会看到 Harness 如何在这一步动手脚来控制 token。</p>
 
-<pre><code>用户消息
-  │
-  ▼
-[Reasoning] 模型推理 ── 输出 text + tool_use block
-  │
-  ▼
-[Acting]    执行工具 ── 得到 tool_result
-  │
-  ▼
-[Reasoning] 再次推理（带上工具结果）── 若还需工具则继续循环
-  │
-  ▼
-[Done]      模型不再输出 tool_use ── stop_reason=end_turn ── 退出</code></pre>
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>把"状态"和"计算"彻底分离：模型负责无状态的计算，状态收敛到调用方的一个数组里。这带来三个白捡的好处——可持久化（存下数组就能续上对话，见第八章 Session）、可回放（重放数组就能复现任何一轮）、可裁剪（要省 token，动数组就行）。凡是你自己要设计的 Agent，第一件事就是想清楚"状态数组长什么样"。</p>
+  <p><span class="role">给产品经理</span>"AI 记不住上文"从来不是模型缺陷，而是产品有没有把历史完整带上的工程选择。当你评估一个 Agent 产品的上下文能力时，真正该问的是："它的历史数组保留策略是什么？超长了怎么裁？"——这决定了体验的连贯性上限。</p>
+</div>
 
-<p>
-  Claude Code 里有一个细节值得注意：循环继续的判断<strong>不靠 <code>stop_reason == 'tool_use'</code></strong>，
-  因为源码注释明确写了这个字段"不总是设置正确"（<code>query.ts:553</code>）。
-  真正的判断是：流式接收过程中有没有解析到 <code>tool_use</code> block，即 <code>needsFollowUp</code> 标志（<code>query.ts:558</code>）。
-</p>
+<h2 id="s1-2">1.2 ReAct 框架</h2>
 
-<pre><code>// query.ts:826  发现 tool_use block 时设置标志
-if (block.type === 'tool_use') {
-  toolUseBlocks.push(block)
-  needsFollowUp = true   // ← 循环继续的唯一信号
-}
+<p>有了状态载体，下一个问题是：<strong>循环每一圈到底按什么套路转？</strong>Claude Code 用的是业界公认的 ReAct 范式。</p>
 
-// 循环末尾判断
-if (!needsFollowUp) {
-  return { reason: 'completed' }  // 退出
-}
-// 否则注入 tool_result，进入下一轮</code></pre>
+<p>ReAct（Reasoning + Acting）由 Google 在 2022 年的论文提出，是当今几乎所有主流 Agent 框架的理论底座。它的核心洞见是：<strong>不要让模型一口气想完再行动，而是让"想"和"做"严格交替</strong>——每做一步，就把结果喂回去，让模型基于真实反馈想下一步。三个交替的动作是：</p>
 
-<h2>1.3 工具调用结果注入</h2>
+<ul>
+  <li><strong>Thought（思考）</strong>——模型用自然语言推理当前局面，决定下一步干什么</li>
+  <li><strong>Action（行动）</strong>——模型发起一次工具调用（在 Claude API 里就是一个 <code>tool_use</code> block）</li>
+  <li><strong>Observation（观察）</strong>——工具执行结果以 <code>tool_result</code> 回注，模型"看到"结果，进入下一轮 Thought</li>
+</ul>
 
-<p>
-  工具执行完毕后，结果不是直接传给模型——它被包装成 <code>tool_result</code> block，
-  以 <strong>user 角色</strong>追加到消息列表。这是 Anthropic API 的协议要求：
-  模型的 <code>tool_use</code> 必须配对一个同 ID 的 <code>tool_result</code>。
-</p>
+<p>三步一圈，循环往复，直到模型在某一轮的 Thought 里判断"任务完成了"，不再发出 Action 为止。Claude Code 的实现就是一个 <code>while(true)</code>（<code>query.ts:307</code>）——正是<strong>章首那张可以点的循环图</strong>。每次迭代严格对应一个完整的 Thought → Action → Observation 周期，落到源码是这六步：</p>
 
-<pre><code># 消息列表在一次完整 ReAct 循环后的结构：
+<ol>
+  <li>预处理 <code>messages</code>（压缩 / 裁剪，第二章展开）</li>
+  <li><strong>[Thought]</strong> 调用模型、流式接收：text block 是推理文字，tool_use block 是行动决定</li>
+  <li>本轮出现 tool_use 了吗？—— <strong>否</strong> 就 <code>return 'completed'</code>（循环唯一的正常出口）</li>
+  <li><strong>[Action]</strong> 执行工具</li>
+  <li><strong>[Observation]</strong> 把 tool_result 注入 <code>messages</code></li>
+  <li><code>turnCount++</code>，检查是否超 <code>maxTurns</code>，然后 <code>continue</code> 回到第 2 步</li>
+</ol>
+
+<p>到这里，"何时停"这个问题浮出水面：<strong>循环怎么知道该转下一圈，还是该收工？</strong>直觉上你会想：看模型返回的 <code>stop_reason</code> 是不是 <code>'tool_use'</code> 不就行了？这正是所有人自己实现时都会踩的坑。Claude Code 源码在这里留了一句醒目的注释（<code>query.ts:554</code>）：</p>
+
+<pre><code>// query.ts:554-556
+// Note: stop_reason === 'tool_use' is unreliable -- it's not always set correctly.
+// Set during streaming whenever a tool_use block arrives — the sole
+// loop-exit signal. If false after streaming, we're done ...</code></pre>
+
+<p>翻译过来：<strong><code>stop_reason</code> 这个字段不可靠，不总是被正确设置，不能拿它当循环判据。</strong>Claude Code 的做法是自己维护一个布尔标志 <code>needsFollowUp</code>——在流式接收过程中，只要亲眼解析到一个 <code>tool_use</code> block，就把它置为 <code>true</code>（<code>query.ts:832-834</code>）：</p>
+
+<pre><code>// query.ts:826-835
+if (message.type === 'assistant') {
+  assistantMessages.push(message)
+  const msgToolUseBlocks = message.message.content.filter(
+    content => content.type === 'tool_use',
+  )
+  if (msgToolUseBlocks.length > 0) {
+    toolUseBlocks.push(...msgToolUseBlocks)
+    needsFollowUp = true   // ← 循环是否继续，只认这个信号
+  }
+}</code></pre>
+
+<p>"我实际收到了工具调用"是自己观察到的事实，"服务端告诉我它停下是因为工具调用"是外部的声明——Claude Code 选择相信前者。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>这是一条能迁移到任何系统的防御式设计原则：<strong>控制流的判据，优先用"你亲自观测到的事实"，而不是"上游承诺的元数据"。</strong>元数据可能缺失、可能语义漂移、可能因协议升级而失真；而"我这轮到底解析出没有工具调用"是确定的。你自己写 Agent 时，别把循环命脉押在 <code>stop_reason</code> 上。</p>
+</div>
+
+<h2 id="s1-3">1.3 流式响应的逐块处理</h2>
+
+<p>上一节说 <code>needsFollowUp</code> 是"在流式接收过程中"设置的——这句话背后是一个绕不开的机制：<strong>模型的输出不是一次性返回的，而是一条持续到达的流。</strong></p>
+
+<p>调用模型返回的是一条 SSE（Server-Sent Events）流，内容一块一块（block by block）陆续到达。Claude Code 的策略是：<strong>每拼装完一个 content block，就立刻把它 yield 出去</strong>，绝不等整条 message 收完。为什么要这么做？两个产品级的理由：</p>
+
+<ul>
+  <li><strong>体验</strong>——用户能看到文字一个字一个字冒出来，而不是盯着转圈等十几秒</li>
+  <li><strong>可中断</strong>——正因为是逐块处理，用户随时按 Ctrl+C，循环能在下一个 block 的边界干净地停下（这正是 1.5 节 <code>aborted_streaming</code> 退出路径的由来）</li>
+</ul>
+
+<p>流式处理的核心是一个状态机，按到达的事件类型逐步拼装每个 block：</p>
+
+<pre><code>for await (const part of stream) {
+  switch (part.type) {
+    case 'content_block_start':
+      // 新 block 开始。tool_use 的 input 先初始化为空字符串，
+      // 因为它的参数是流式拼接的 JSON，还没收全
+      blocks[part.index] = { ...part.content_block, input: '' }
+      break
+
+    case 'content_block_delta':
+      // 增量到达，追加到对应 block：
+      //   text_delta       → block.text  += delta.text
+      //   input_json_delta → block.input += delta.partial_json
+      break
+
+    case 'content_block_stop':
+      // 一个 block 收全了 → 立刻组装成 AssistantMessage 并 yield
+      // query.ts 收到后马上检查它是不是 tool_use，决定 needsFollowUp
+      yield assembledMessage
+      break
+  }
+}</code></pre>
+
+<p>这里有两个值得记住的工程细节：</p>
+
+<p>第一，<strong>tool_use 的参数是"流式拼接的 JSON 字符串"</strong>。模型不会一次性给你一个完整的参数对象，而是把 <code>{"city": "北京"}</code> 这段 JSON 一个片段一个片段地发过来，拼在 <code>input</code> 字符串上。只有等 <code>content_block_stop</code>、整段收全了，才能 <code>JSON.parse</code> 成真正的参数对象。这解释了一个常见困惑："为什么不能边收工具参数边执行？"——因为在收全之前，你手里的参数是不完整、无法解析的。</p>
+
+<p>第二，逐块 yield 意味着<strong>一条 assistant message 可能包含多个 block</strong>：先来一段 text（模型的推理），再来一个或多个 tool_use（模型的决定）。这也是为什么模型能在一轮里同时发起多个工具调用——下一节就用到这一点。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给产品经理</span>"流式输出"不是锦上添花的动效，而是 Agent 可交互性的地基。有了逐块流，才谈得上"实时展示进度""随时打断""看着它一步步干活"这些让 Agent 从黑盒变成协作者的体验。评估 Agent 产品时，"能不能中途喊停、喊停后状态是否干净"是一条硬指标。</p>
+</div>
+
+<h2 id="s1-4">1.4 工具调用结果注入</h2>
+
+<p>模型发出了 <code>tool_use</code>，Claude Code 执行完工具，拿到了结果——现在轮到最后一个环节：<strong>怎么把结果还给模型？</strong></p>
+
+<p>答案里藏着一个初学者常觉得"反直觉"的协议约定：工具结果不是以某种"系统消息"或"函数返回"的身份传回，而是被包装成 <code>tool_result</code> block、<strong>以 user（用户）角色</strong>追加进消息列表。这是 Anthropic API 的强制协议：每个 <code>tool_use</code> 必须有一个 <code>tool_use_id</code> 完全相同的 <code>tool_result</code> 与之配对，且必须紧跟在那条 assistant 消息之后。</p>
+
+<p>下面是一次完整 ReAct 循环之后，<code>messages</code> 数组的真实形态（顺便演示 1.3 说的"一轮里发起多个工具调用"）：</p>
+
+<pre><code># 用户要"查北京和上海的天气再比较"，模型一轮里发起两个工具调用
 
 [
-  {"role": "user",      "content": "帮我查北京天气"},
+  # ── 用户请求
+  {"role": "user", "content": "帮我查北京和上海的天气，然后比较一下"},
+
+  # ── [Thought+Action] 模型推理，并同时发起两个 tool_use
   {"role": "assistant", "content": [
-      {"type": "text",     "text": "我来查一下..."},
-      {"type": "tool_use", "id": "tu_01", "name": "get_weather", "input": {"city": "北京"}}
+    {"type": "text",     "text": "我来同时查询两个城市..."},
+    {"type": "tool_use", "id": "tu_01", "name": "get_weather", "input": {"city": "北京"}},
+    {"type": "tool_use", "id": "tu_02", "name": "get_weather", "input": {"city": "上海"}}
   ]},
-  {"role": "user",      "content": [          # ← tool_result 以 user 角色注入
-      {"type": "tool_result", "tool_use_id": "tu_01", "content": "晴，18°C"}
+
+  # ── [Observation] 两个结果以 user 角色注入，靠 tool_use_id 配对
+  {"role": "user", "content": [
+    {"type": "tool_result", "tool_use_id": "tu_01", "content": "晴，18°C"},
+    {"type": "tool_result", "tool_use_id": "tu_02", "content": "多云，22°C"}
   ]},
+
+  # ── 下一轮 Thought：模型基于结果给出最终回答，不再发 tool_use → 循环结束
   {"role": "assistant", "content": [
-      {"type": "text", "text": "北京今天晴天，18°C，适合出行。"}
+    {"type": "text", "text": "北京晴 18°C，上海多云 22°C，上海更暖..."}
   ]}
 ]</code></pre>
 
-<p>
-  Claude Code 支持并发执行多个工具（read-only 工具），但 write 工具必须串行——
-  这是工具系统的调度逻辑，第三章详细展开。
-</p>
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">动画 · 并发</span>
+    <span class="figure-title">tool_use ↔ tool_result：靠 id 配对，可以乱序并发 <span class="hint">— 小球在跑，两条通道同时进行</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 258" role="img" aria-label="工具调用配对与并发示意图">
+    <style>
+      .f3 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f3 .boxt{font-size:11.5px;font-weight:700;fill:#3a3326}
+      .f3 .chipt{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:700}
+      .f3 .chips{font-size:11px;fill:#5a5346}
+      .f3 .note{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;fill:#8a8172}
+      .f3 .lane1{stroke:#C77D2B} .f3 .lane2{stroke:#2563EB}
+    </style>
+    <defs>
+      <marker id="f3a1" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#C77D2B"/></marker>
+      <marker id="f3a2" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#2563EB"/></marker>
+    </defs>
+    <g class="f3">
+      <!-- assistant -->
+      <rect x="18" y="34" width="212" height="150" rx="11" fill="#F1ECFB" stroke="#6D45C9" stroke-opacity=".5"/>
+      <text class="boxt" x="34" y="56" fill="#6D45C9">assistant</text>
+      <text class="note" x="34" y="72">一条消息，两个 tool_use</text>
+      <rect x="34" y="82" width="180" height="42" rx="8" fill="#fff" stroke="#C77D2B" stroke-opacity=".7"/>
+      <text class="chipt" x="46" y="100" fill="#C77D2B">tool_use · tu_01</text>
+      <text class="chips" x="46" y="116">get_weather 北京</text>
+      <rect x="34" y="132" width="180" height="42" rx="8" fill="#fff" stroke="#2563EB" stroke-opacity=".7"/>
+      <text class="chipt" x="46" y="150" fill="#2563EB">tool_use · tu_02</text>
+      <text class="chips" x="46" y="166">get_weather 上海</text>
 
-<h2>1.4 maxTurns 熔断机制</h2>
+      <!-- concurrency region -->
+      <rect x="248" y="42" width="220" height="134" rx="11" fill="none" stroke="#b7ad9c" stroke-dasharray="4 4"/>
+      <text x="358" y="60" text-anchor="middle" class="note" fill="#8a8172">并发执行 · read-only</text>
 
-<p>
-  如果模型陷入循环（不断调工具却没有结论），或者任务天然需要很多步骤，
-  Loop 需要有一个硬上限防止无限运行。
-</p>
-<p>
-  Claude Code 在每轮末尾检查 <code>turnCount</code>，超过 <code>maxTurns</code> 就发出事件并返回（<code>query.ts:1704</code>）：
-</p>
+      <!-- lanes -->
+      <line class="lane1" x1="230" y1="103" x2="486" y2="103" stroke-width="1.8" marker-end="url(#f3a1)"/>
+      <line class="lane2" x1="230" y1="153" x2="486" y2="153" stroke-width="1.8" marker-end="url(#f3a2)"/>
+      <circle r="4.5" fill="#C77D2B"><animateMotion dur="1.8s" repeatCount="indefinite" path="M230,103 L482,103"/></circle>
+      <circle r="4.5" fill="#2563EB"><animateMotion dur="1.8s" repeatCount="indefinite" path="M230,153 L482,153"/></circle>
 
-<pre><code>// query.ts:1704
+      <!-- results / user -->
+      <rect x="490" y="34" width="212" height="150" rx="11" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="boxt" x="506" y="56" fill="#1F8F5F">user · tool_result</text>
+      <text class="note" x="506" y="72">按 tool_use_id 归位</text>
+      <rect x="506" y="82" width="180" height="42" rx="8" fill="#fff" stroke="#1F8F5F" stroke-opacity=".6"/>
+      <text class="chipt" x="518" y="100" fill="#1F8F5F">result · tu_01</text>
+      <text class="chips" x="518" y="116">晴 18°C</text>
+      <rect x="506" y="132" width="180" height="42" rx="8" fill="#fff" stroke="#1F8F5F" stroke-opacity=".6"/>
+      <text class="chipt" x="518" y="150" fill="#1F8F5F">result · tu_02</text>
+      <text class="chips" x="518" y="166">多云 22°C</text>
+
+      <text x="360" y="208" text-anchor="middle" class="note">read-only 工具并发（默认上限 10 · CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY）　·　write 工具串行</text>
+      <text x="360" y="228" text-anchor="middle" class="note" fill="#b7ad9c">颜色只表示 id 配对关系，与谁先返回无关——乱序也不会错位</text>
+    </g>
+  </svg>
+</div>
+
+<p>把结果放回数组之前，还要过一道 <code>normalizeMessagesForAPI</code>（<code>query.ts:1396</code>）——它负责把 Claude Code 内部的消息格式转成 API 认的"线上格式"：过滤内部专用的虚拟消息、合并相邻的 user 消息（某些后端如 Bedrock 的兼容要求）、清理超大媒体、剥掉内部字段。这层"内外格式转换"你现在不必细究，只需知道：<strong>内部消息模型 ≠ API wire 格式，中间隔着一层规整化。</strong></p>
+
+<p>最后点一个上面例子已经埋下的伏笔：同一轮的多个工具调用是<strong>并发</strong>执行的（read-only 工具走并发，并发上限由环境变量 <code>CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY</code> 控制，默认 10）；而会改动文件/状态的 write 类工具必须<strong>串行</strong>。为什么这样区分、调度器怎么实现，是第三章"工具系统"的主题。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>注意这个协议设计的精妙：用 <code>tool_use_id</code> 做配对，而不依赖顺序。正因如此，多个工具才能乱序并发、谁先返回都不影响正确性——只要 id 对得上就能归位。你设计任何"发起—回执"式的异步接口时，都值得学这一招：<strong>用显式 ID 配对，而非隐式顺序。</strong></p>
+</div>
+
+<h2 id="s1-5">1.5 maxTurns 熔断与全部退出路径</h2>
+
+<p>循环的正常出口只有一个：模型不再发 tool_use（<code>completed</code>）。但"正常"是理想情况——万一模型陷入死循环，一遍遍调工具却始终给不出结论呢？任何 <code>while(true)</code> 都必须配一个<strong>熔断闸</strong>，否则就是一颗定时炸弹。这就是 <code>maxTurns</code>。</p>
+
+<p>先说清 <code>turnCount</code> 的语义，它容易被误解：它从 <strong>1</strong> 起步，含义是"即将向模型发起第几次调用"——初始用户请求是 turn 1，第一次工具 follow-up 是 turn 2，以此类推。每当有工具结果、循环准备再转一圈时，在末尾 +1 并检查上限（<code>query.ts:1705</code>）：</p>
+
+<pre><code>// query.ts:1679, 1705-1711
+const nextTurnCount = turnCount + 1
+
 if (maxTurns && nextTurnCount > maxTurns) {
-  yield { type: 'max_turns_reached', maxTurns, turnCount }
-  return { reason: 'max_turns' }
+  yield createAttachmentMessage({ type: 'max_turns_reached', maxTurns })
+  return { reason: 'max_turns', turnCount: nextTurnCount }
 }</code></pre>
 
-<p>
-  除 <code>max_turns</code> 外，循环还有以下退出路径：
-</p>
-<ul>
-  <li><code>completed</code> — 模型正常完成（无 tool_use，end_turn）</li>
-  <li><code>aborted_streaming</code> / <code>aborted_tools</code> — 用户中断</li>
-  <li><code>prompt_too_long</code> — 上下文超出模型限制</li>
-  <li><code>model_error</code> — 模型调用异常</li>
-</ul>
-<p>
-  实际使用时，<code>maxTurns</code> 的合理值取决于任务复杂度。Claude Code 默认不设上限（交互模式），
-  非交互脚本模式建议设 10–50。
-</p>
+<p><code>completed</code> 和 <code>max_turns</code> 只是最常见的两个出口。一个成熟的循环，退出路径远不止"正常结束"和"跑太久"——它要应对中断、报错、上下文超限、Hook 拦截等各种现实。下面是 Claude Code 全部的 Terminal 退出路径：</p>
+
+<table>
+  <thead><tr><th>reason</th><th>触发条件</th></tr></thead>
+  <tbody>
+    <tr><td><code>completed</code></td><td>模型正常完成：本轮无 tool_use，needsFollowUp = false（唯一"正常"出口）</td></tr>
+    <tr><td><code>max_turns</code></td><td>nextTurnCount 超过 maxTurns 上限 —— 防死循环的熔断闸</td></tr>
+    <tr><td><code>aborted_streaming</code></td><td>模型流式响应过程中用户中断（Ctrl+C）</td></tr>
+    <tr><td><code>aborted_tools</code></td><td>工具执行过程中用户中断</td></tr>
+    <tr><td><code>prompt_too_long</code></td><td>上下文过长，且所有恢复路径（compact 压缩等）都已耗尽</td></tr>
+    <tr><td><code>model_error</code></td><td>模型调用抛出无法恢复的异常</td></tr>
+    <tr><td><code>image_error</code></td><td>图片尺寸/处理错误</td></tr>
+    <tr><td><code>blocking_limit</code></td><td>token 总量超过硬性阻断上限（自动压缩关闭时）</td></tr>
+    <tr><td><code>stop_hook_prevented</code> / <code>hook_stopped</code></td><td>Hook 显式要求停止（第七章）</td></tr>
+  </tbody>
+</table>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">出口图 · 悬停</span>
+    <span class="figure-title">循环的全部出口 <span class="hint">— 把鼠标移到某条出口上，看它从哪来</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 300" role="img" aria-label="循环退出路径示意图">
+    <style>
+      .f4 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f4 .ereason{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px}
+      .f4 .econd{font-size:11px;fill:#6e6353}
+      .f4 .hubt{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;font-weight:700;fill:#6D45C9}
+    </style>
+    <g class="f4">
+      <!-- hub -->
+      <rect x="26" y="112" width="184" height="76" rx="12" fill="#F1ECFB" stroke="#6D45C9" stroke-width="1.6"/>
+      <text x="118" y="145" text-anchor="middle" class="hubt">queryLoop</text>
+      <text x="118" y="166" text-anchor="middle" class="econd" fill="#6D45C9">while (true)</text>
+
+      <!-- completed -->
+      <g class="exitnode">
+        <path class="exitline" d="M210,150 L432,35" stroke="#1F8F5F" fill="none"/>
+        <rect class="epill" x="432" y="18" width="272" height="34" rx="17" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".6" stroke-width="1.3"/>
+        <text class="ereason" x="450" y="39" fill="#1F8F5F">completed</text>
+        <text class="econd" x="562" y="39">正常收工 · 无 tool_use</text>
+      </g>
+      <!-- max_turns -->
+      <g class="exitnode">
+        <path class="exitline" d="M210,150 L432,81" stroke="#C77D2B" fill="none"/>
+        <rect class="epill" x="432" y="64" width="272" height="34" rx="17" fill="#FBF1E6" stroke="#C77D2B" stroke-opacity=".6" stroke-width="1.3"/>
+        <text class="ereason" x="450" y="85" fill="#C77D2B">max_turns</text>
+        <text class="econd" x="558" y="85">超轮次上限 · 熔断</text>
+      </g>
+      <!-- aborted -->
+      <g class="exitnode">
+        <path class="exitline" d="M210,150 L432,127" stroke="#C77D2B" fill="none"/>
+        <rect class="epill" x="432" y="110" width="272" height="34" rx="17" fill="#FBF1E6" stroke="#C77D2B" stroke-opacity=".6" stroke-width="1.3"/>
+        <text class="ereason" x="450" y="131" fill="#C77D2B">aborted_*</text>
+        <text class="econd" x="556" y="131">用户中断（Ctrl+C）</text>
+      </g>
+      <!-- prompt_too_long -->
+      <g class="exitnode">
+        <path class="exitline" d="M210,150 L432,173" stroke="#C77D2B" fill="none"/>
+        <rect class="epill" x="432" y="156" width="272" height="34" rx="17" fill="#FBF1E6" stroke="#C77D2B" stroke-opacity=".6" stroke-width="1.3"/>
+        <text class="ereason" x="450" y="177" fill="#C77D2B">prompt_too_long</text>
+        <text class="econd" x="592" y="177">上下文超限不可恢复</text>
+      </g>
+      <!-- model_error -->
+      <g class="exitnode">
+        <path class="exitline" d="M210,150 L432,219" stroke="#C8344E" fill="none"/>
+        <rect class="epill" x="432" y="202" width="272" height="34" rx="17" fill="#FBEEE9" stroke="#C8344E" stroke-opacity=".6" stroke-width="1.3"/>
+        <text class="ereason" x="450" y="223" fill="#C8344E">model_error / image_error</text>
+      </g>
+      <!-- hook -->
+      <g class="exitnode">
+        <path class="exitline" d="M210,150 L432,265" stroke="#C8344E" fill="none"/>
+        <rect class="epill" x="432" y="248" width="272" height="34" rx="17" fill="#FBEEE9" stroke="#C8344E" stroke-opacity=".6" stroke-width="1.3"/>
+        <text class="ereason" x="450" y="269" fill="#C8344E">hook_stopped / stop_hook</text>
+      </g>
+
+      <text x="118" y="210" text-anchor="middle" class="econd" fill="#9a8f7b">绿 = 正常　橙 = 达到边界　红 = 异常</text>
+    </g>
+  </svg>
+  <div class="figure-cap">一个成熟的循环，出口不止"跑完了"——它要为中断、超限、报错、Hook 拦截各留一条<strong>有名字的</strong>退路。</div>
+</div>
+
+<p>与"退出"相对的还有一组<strong>"不退出、而是恢复后继续转"</strong>的内部分支（源码里叫 Continue transition），例如 <code>max_output_tokens_escalate</code>（输出被截断 → 提高 max_tokens 上限重试）、<code>reactive_compact_retry</code>（上下文爆了 → 紧急压缩后重试）。它们不是本章重点，但值得先埋个印象：<strong>Claude Code 的循环里，"出错"绝大多数时候的第一反应不是退出，而是想办法恢复着继续跑。</strong>这套恢复机制正是第二章 Harness 的核心价值。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>把一堆 <code>if</code> 散落各处，不如像 Claude Code 这样：让循环体的每个出口都返回一个带 <code>reason</code> 的结构化结果。退出路径一旦被显式枚举成一张表，就变得可测试、可监控、可穷尽——你能对着这张表逐条问"这个分支我处理了吗"。</p>
+  <p><span class="role">给产品经理</span>Agent 会失败，这是必然，不是意外。产品的成熟度，恰恰体现在"失败得体不体面"：是无声地卡死，还是明确告诉用户"我达到最大步数了/上下文太长了/被你打断了"？上面这张退出路径表，本质上就是一份"Agent 会以哪些方式收场"的产品清单——每一种都对应一句该给用户的话。</p>
+</div>
 
 <hr>
 
 <h2>本章代码</h2>
-<p>
-  完整可运行代码在 <code>code/ch01_agent_loop.py</code>，包含完整的 ReAct 循环实现、
-  两个示例工具（calculator、get_weather）和事件流输出。
-</p>
-<pre><code># 运行方式（需要设置 ANTHROPIC_API_KEY）
+
+<p>完整实现在 <code>code/examples/loop_demo.py</code>，把本章五个机制逐一落地：State 对象、ReAct 循环、流式接收、tool_result 注入、maxTurns 熔断。它足够短，你可以一行行读完。</p>
+
+<pre><code># 运行（需先设置 ANTHROPIC_API_KEY）
 cd code
-uv run python ch01_agent_loop.py</code></pre>
+uv run python examples/loop_demo.py</code></pre>
 
-<p>核心结构对照：</p>
-<pre><code># ch01_agent_loop.py  →  Claude Code 源码对照
+<p>骨架与源码的对应关系——这张对照表就是本章的一页纸总结：</p>
 
-messages = [...]              # State.messages        query.ts:204
-while True:                   # while(true) 主循环    query.ts:307
-    if turn_count > max_turns:  # maxTurns 熔断       query.ts:1704
-        ...
-    response = client.messages.create(...)  # callModel  query.ts:659
-    needs_follow_up = len(tool_use_blocks) > 0  # needsFollowUp  query.ts:558
-    if not needs_follow_up:
-        return {"reason": "completed"}      # 退出      query.ts:1264
-    messages.append(tool_results)           # 注入结果  query.ts:1715
-    turn_count += 1</code></pre>
+<pre><code># loop_demo.py 骨架                         ←→  src/query.ts
+
+messages = [...]            # 1.1 状态载体              query.ts:205
+turn_count = 1             # 1.5 turnCount 从 1 起      query.ts:276
+
+while True:                # 1.2 ReAct 主循环          query.ts:307
+    response = call_model(messages)          # 调模型     query.ts:659
+    needs_follow_up = any tool_use in blocks # 1.2/1.3   query.ts:558/834
+
+    if not needs_follow_up:                  # 1.2 唯一正常出口
+        return Result("completed")           #           query.ts:1357
+
+    tool_results = run_tools(tool_use_blocks)# 1.4 执行工具 query.ts:1382
+    messages += [assistant_msg, tool_results]# 1.1 三段拼接 query.ts:1716
+
+    turn_count += 1                          # 1.5 熔断检查
+    if max_turns and turn_count > max_turns:
+        return Result("max_turns")           #           query.ts:1705</code></pre>
 
 <div class="page-nav">
   <button class="page-nav-btn" onclick="showPage('cover')">

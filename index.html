@@ -453,29 +453,109 @@
     min-width: 900px;
   }
 
-  .toc-list {
-    list-style: none;
+  /* ── 简介区 ── */
+  .intro-card {
+    background: var(--accent-bg);
+    border: 1px solid rgba(109,69,201,0.18);
+    border-radius: 12px;
+    padding: 24px 28px;
+    margin-bottom: 40px;
+  }
+  .intro-card p { margin-bottom: 10px; color: var(--ink2); font-size: 15px; line-height: 1.8; }
+  .intro-card p:last-child { margin-bottom: 0; }
+  .intro-repo {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 14px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--accent);
+    text-decoration: none;
+    background: rgba(109,69,201,0.08);
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid rgba(109,69,201,0.2);
+    transition: background 0.15s;
+  }
+  .intro-repo:hover { background: rgba(109,69,201,0.15); }
+
+  /* ── 时间线目录 ── */
+  .toc-timeline {
+    position: relative;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 0;
+    margin: 8px 0 32px 0;
   }
-  .toc-chapter {
-    font-size: 13.5px;
+  .toc-timeline::before {
+    content: '';
+    position: absolute;
+    left: 18px;
+    top: 24px;
+    bottom: 24px;
+    width: 2px;
+    background: linear-gradient(to bottom, var(--accent) 0%, rgba(109,69,201,0.15) 100%);
+    border-radius: 2px;
+  }
+  .toc-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    padding: 14px 16px 14px 0;
+    cursor: pointer;
+    border-radius: 10px;
+    transition: background 0.18s, box-shadow 0.18s, transform 0.15s;
+    position: relative;
+  }
+  .toc-item:hover {
+    background: rgba(109,69,201,0.05);
+    box-shadow: 0 2px 12px rgba(109,69,201,0.10);
+    transform: translateX(2px);
+  }
+  .toc-dot {
+    flex-shrink: 0;
+    width: 38px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding-top: 2px;
+  }
+  .toc-dot-inner {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid white;
+    box-shadow: 0 0 0 2px var(--accent);
+    transition: transform 0.18s;
+  }
+  .toc-item:hover .toc-dot-inner {
+    transform: scale(1.35);
+    background: var(--accent);
+  }
+  .toc-ref .toc-dot-inner {
+    background: var(--ink3);
+    box-shadow: 0 0 0 2px var(--ink3);
+  }
+  .toc-body { flex: 1; min-width: 0; }
+  .toc-chapter-title {
+    font-size: 14px;
     font-weight: 600;
     color: var(--ink);
-    padding: 8px 0 4px;
-    border-top: 1px solid var(--sidebar-border);
-    cursor: pointer;
+    margin-bottom: 4px;
+    transition: color 0.15s;
   }
-  .toc-chapter:hover { color: var(--accent); }
-  .toc-chapter:first-child { border-top: none; }
-  .toc-section {
-    font-size: 12.5px;
-    color: var(--ink2);
-    padding: 3px 0 3px 16px;
-    cursor: pointer;
+  .toc-item:hover .toc-chapter-title { color: var(--accent); }
+  .toc-chapter-desc {
+    font-size: 12px;
+    color: var(--ink3);
+    line-height: 1.6;
+    font-family: var(--mono);
   }
-  .toc-section:hover { color: var(--accent); }
+
+  /* 旧 toc-list 保留以防万一 */
+  .toc-list { list-style: none; display: flex; flex-direction: column; gap: 4px; }
 
   /* 表格 */
   table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: 13.5px; }
@@ -520,8 +600,9 @@
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showPage('cover')">1. Claude Code 核心组件</a>
-        <a class="nav-section" onclick="showPage('cover')">2. 目录</a>
+        <a class="nav-section" onclick="showPage('cover')">1. 简介</a>
+        <a class="nav-section" onclick="showPage('cover')">2. Claude Code 核心组件</a>
+        <a class="nav-section" onclick="showPage('cover')">3. 目录</a>
       </div>
     </div>
 
@@ -648,14 +729,20 @@
 
       <!-- ══ 封面 ══ -->
       <div class="page active cover" id="page-cover">
-        <h1>Claude Code架构介绍</h1>
-        <p class="cover-lead">
-          基于 Claude Code 真实源码，从产品角度解析七个核心能力层的设计决策，
-          读完能真正理解并实现一个同等架构的 Agent 系统。
-        </p>
+        <h1>Claude Code 设计与实现</h1>
+
+        <h2>1. 简介</h2>
+        <div class="intro-card">
+          <p>本书从零系统学习 Claude Code 的企业级 Agent 核心机制。基于 Claude Code 真实源码，逐层解析 Agent Loop、Harness 运行时、工具系统、SubAgent、协调器模式、Agent 间通信、权限安全、Session 持久化八个核心能力层的设计决策。</p>
+          <p>每章配套 Python 实现代码，对照源码行号，读完能真正理解并独立实现一个同等架构的企业级 Agent 系统。</p>
+          <a class="intro-repo" href="https://github.com/anxiong2025/claude-code-design-implement" target="_blank">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            anxiong2025/claude-code-design-implement
+          </a>
+        </div>
 
         <!-- 架构示意图 -->
-        <h2>1. Claude Code 核心组件</h2>
+        <h2>2. Claude Code 核心组件</h2>
         <div class="cover-diagram">
           <div class="diagram-eyebrow">Claude Code · Architecture</div>
           <div class="diagram-frame" onclick="openDiagramLightbox()" title="点击放大">
@@ -874,34 +961,82 @@
           </div>
         </div>
 
-        <h2>2. 目录</h2>
-        <ul class="toc-list">
-          <li class="toc-chapter" onclick="showPage('ch1')">第一章 · Agent Loop（核心循环）</li>
-          <li class="toc-section" onclick="showPage('ch1')">消息列表状态 · ReAct 框架 · 工具调用注入 · maxTurns 熔断</li>
+        <h2>3. 目录</h2>
+        <div class="toc-timeline">
 
-          <li class="toc-chapter" onclick="showPage('ch2')">第二章 · Harness 运行时——执行引擎</li>
-          <li class="toc-section" onclick="showPage('ch2')">queryLoop 边界 · Prompt 组装 · Token 预算 · 记忆预取 · 上下文压缩</li>
+          <div class="toc-item" onclick="showPage('ch1')">
+            <div class="toc-dot"><div class="toc-dot-inner"></div></div>
+            <div class="toc-body">
+              <div class="toc-chapter-title">第一章 · Agent Loop（核心循环）</div>
+              <div class="toc-chapter-desc">消息列表状态 · ReAct 框架 · 工具调用注入 · maxTurns 熔断</div>
+            </div>
+          </div>
 
-          <li class="toc-chapter" onclick="showPage('ch3')">第三章 · 工具系统——Agent 的手</li>
-          <li class="toc-section" onclick="showPage('ch3')">Tool 接口定义 · 工具注册表 · 读并发/写独占调度 · MCP 统一接入</li>
+          <div class="toc-item" onclick="showPage('ch2')">
+            <div class="toc-dot"><div class="toc-dot-inner"></div></div>
+            <div class="toc-body">
+              <div class="toc-chapter-title">第二章 · Harness 运行时——执行引擎</div>
+              <div class="toc-chapter-desc">queryLoop 边界 · Prompt 组装 · Token 预算 · 记忆预取 · 上下文压缩</div>
+            </div>
+          </div>
 
-          <li class="toc-chapter" onclick="showPage('ch4')">第四章 · SubAgent——并行隔离执行</li>
-          <li class="toc-section" onclick="showPage('ch4')">派生原理 · 上下文隔离 · 同步/异步派发 · 拆分约束 · Worktree 隔离</li>
+          <div class="toc-item" onclick="showPage('ch3')">
+            <div class="toc-dot"><div class="toc-dot-inner"></div></div>
+            <div class="toc-body">
+              <div class="toc-chapter-title">第三章 · 工具系统——Agent 的手</div>
+              <div class="toc-chapter-desc">Tool 接口定义 · 工具注册表 · 读并发/写独占调度 · MCP 统一接入</div>
+            </div>
+          </div>
 
-          <li class="toc-chapter" onclick="showPage('ch5')">第五章 · 协调器模式——星形多 Agent</li>
-          <li class="toc-section" onclick="showPage('ch5')">Coordinator 角色设计 · Worker 结果聚合 · SendMessage 协议 · 并发管理</li>
+          <div class="toc-item" onclick="showPage('ch4')">
+            <div class="toc-dot"><div class="toc-dot-inner"></div></div>
+            <div class="toc-body">
+              <div class="toc-chapter-title">第四章 · SubAgent——并行隔离执行</div>
+              <div class="toc-chapter-desc">派生原理 · 上下文隔离 · 同步/异步派发 · 拆分约束 · Worktree 隔离</div>
+            </div>
+          </div>
 
-          <li class="toc-chapter" onclick="showPage('ch6')">第六章 · Agent 间通信——Mailbox</li>
-          <li class="toc-section" onclick="showPage('ch6')">架构设计 · Agent 寻址 · 消息分类过滤</li>
+          <div class="toc-item" onclick="showPage('ch5')">
+            <div class="toc-dot"><div class="toc-dot-inner"></div></div>
+            <div class="toc-body">
+              <div class="toc-chapter-title">第五章 · 协调器模式——星形多 Agent</div>
+              <div class="toc-chapter-desc">Coordinator 角色设计 · Worker 结果聚合 · SendMessage 协议 · 并发管理</div>
+            </div>
+          </div>
 
-          <li class="toc-chapter" onclick="showPage('ch7')">第七章 · 权限与安全</li>
-          <li class="toc-section" onclick="showPage('ch7')">权限模式 · 工具许可列表 · 中止信号传播</li>
+          <div class="toc-item" onclick="showPage('ch6')">
+            <div class="toc-dot"><div class="toc-dot-inner"></div></div>
+            <div class="toc-body">
+              <div class="toc-chapter-title">第六章 · Agent 间通信——Mailbox</div>
+              <div class="toc-chapter-desc">架构设计 · Agent 寻址机制 · 消息分类过滤</div>
+            </div>
+          </div>
 
-          <li class="toc-chapter" onclick="showPage('ch8')">第八章 · Session 持久化与恢复</li>
-          <li class="toc-section" onclick="showPage('ch8')">State 序列化 · 恢复机制 · Compact 压缩</li>
+          <div class="toc-item" onclick="showPage('ch7')">
+            <div class="toc-dot"><div class="toc-dot-inner"></div></div>
+            <div class="toc-body">
+              <div class="toc-chapter-title">第七章 · 权限与安全</div>
+              <div class="toc-chapter-desc">权限模式 · 工具许可列表 · 中止信号传播</div>
+            </div>
+          </div>
 
-          <li class="toc-chapter" onclick="showPage('ref')">核心文件速查</li>
-        </ul>
+          <div class="toc-item" onclick="showPage('ch8')">
+            <div class="toc-dot"><div class="toc-dot-inner"></div></div>
+            <div class="toc-body">
+              <div class="toc-chapter-title">第八章 · Session 持久化与恢复</div>
+              <div class="toc-chapter-desc">State 序列化 · 恢复机制 · Compact 压缩</div>
+            </div>
+          </div>
+
+          <div class="toc-item toc-ref" onclick="showPage('ref')">
+            <div class="toc-dot"><div class="toc-dot-inner"></div></div>
+            <div class="toc-body">
+              <div class="toc-chapter-title">附录 · 核心文件速查</div>
+              <div class="toc-chapter-desc">各章节源码文件与关键函数对照表</div>
+            </div>
+          </div>
+
+        </div>
 
         <div class="page-nav">
           <div></div>

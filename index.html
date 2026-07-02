@@ -1113,25 +1113,44 @@ state = next  // 下一次迭代从这里读取</code></pre>
 
 <h2 id="s1-2">1.2 ReAct 框架</h2>
 
-<p>ReAct（Reasoning + Acting）由 Google 2022 年论文提出，是当前主流 Agent 框架的理论基础。其本质只有一句话：<strong>模型的每一步推理结果，都作为下一步行动的输入；每一步行动的结果，都作为下一步推理的输入。</strong>两者交替，直到模型认为任务完成。</p>
+<p>ReAct（Reasoning + Acting）由 Google 2022 年论文提出，是当前主流 Agent 框架的理论基础。论文定义了三个严格交替的步骤：</p>
 
-<p>Claude Code 的实现是一个 <code>while(true)</code> 循环（<code>query.ts:307</code>），每次迭代对应一个完整的 Reasoning→Acting 周期：</p>
+<ul>
+  <li><strong>Thought（思考）</strong>——模型用自然语言推理当前情况，决定下一步做什么</li>
+  <li><strong>Action（行动）</strong>——模型发起工具调用（在 Claude API 里就是 <code>tool_use</code> block）</li>
+  <li><strong>Observation（观察）</strong>——工具执行结果以 <code>tool_result</code> 注入，模型"看到"结果后进入下一轮 Thought</li>
+</ul>
 
-<pre><code>                    ┌─────────────────────────────────┐
-                    │         while (true)             │
-                    │                                  │
-  用户输入 ──────►  │  1. 预处理 messages               │
-                    │  2. [Reasoning] 调用模型，流式接收  │
-                    │     逐个 content block yield 出去  │
-                    │  3. 解析：有 tool_use block 吗？   │
-                    │     否 → return { reason: 'completed' }  ──► 退出
-                    │     是 → needsFollowUp = true     │
-                    │  4. [Acting] 执行所有工具           │
-                    │  5. 拼装新 State，turnCount++      │
-                    │  6. 检查 maxTurns，到了则退出       │
-                    └──────────────────┬──────────────┘
-                                       │ continue
-                                       └──────────────►（下一轮）</code></pre>
+<p>三步一轮，不断循环，直到模型在 Thought 阶段判断任务已完成、不再发出 Action 为止。</p>
+
+<p>Claude Code 的实现是一个 <code>while(true)</code> 循环（<code>query.ts:307</code>），每次迭代严格对应一个完整的 Thought → Action → Observation 周期：</p>
+
+<pre><code>  用户输入
+     │
+     ▼
+┌────────────────────────────────────────┐
+│              while (true)              │
+│                                        │
+│  ① 预处理 messages                     │
+│                                        │
+│  ② [Thought]  调用模型，流式接收        │
+│     text block  → 模型的推理文字        │
+│     tool_use block → 模型决定调用工具   │
+│                                        │
+│  ③ needsFollowUp = tool_use 存在？      │
+│     否 ──────────────────────────────► return { reason: 'completed' }
+│     是 ↓                               │
+│                                        │
+│  ④ [Action]   并发执行所有工具          │
+│                                        │
+│  ⑤ [Observation] tool_result 注入      │
+│     messages.push({ role:'user',       │
+│       content: [tool_result, ...] })   │
+│                                        │
+│  ⑥ turnCount++ → 超 maxTurns？退出     │
+└────────────────────┬───────────────────┘
+                     │ continue
+                     └──────────►（下一轮 Thought）</code></pre>
 
 <p>这里有一个所有人自己实现时都会踩的坑：<strong>不能用 <code>stop_reason == 'tool_use'</code> 来判断是否要继续循环。</strong> Claude Code 源码的注释明确写道（<code>query.ts:553</code>）：</p>
 

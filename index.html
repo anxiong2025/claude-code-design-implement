@@ -335,6 +335,27 @@
     margin-right: 4px;
   }
 
+  /* 概念 / 定义 卡片（青色，区别于紫色的“设计启示”） */
+  .concept {
+    background: linear-gradient(to right, rgba(31,143,95,0.06), transparent 92%);
+    border-left: 3px solid #1F8F5F;
+    border-radius: 0 8px 8px 0;
+    padding: 14px 18px;
+    margin: 20px 0 24px;
+  }
+  .concept-label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #1F8F5F;
+    margin-bottom: 6px;
+  }
+  .concept p { margin: 0; font-size: 13.5px; color: var(--ink); }
+  .concept p + p { margin-top: 8px; }
+  .concept .term { font-weight: 700; color: #147a4f; }
+
   /* ── 章节配图 ── */
   .figure {
     margin: 24px 0 28px;
@@ -1274,6 +1295,12 @@
 
 <p>这个问题之所以关键，是因为大模型有一个反直觉的特性——<strong>它是无状态的</strong>。每次调 API 都是一次全新的、互不相识的请求，模型不会"记得"上一轮你们聊了什么。那多轮对话里的上下文靠什么活下去？</p>
 
+<div class="concept">
+  <div class="concept-label">概念 · 无状态 stateless</div>
+  <p><span class="term">无状态（stateless）</span>指的是：服务端不为你保存任何"上一次"的信息，每一次请求都被当作第一次、独立处理。大模型 API 就是典型的无状态服务——你这次发的请求里包含什么，它就只能看到什么；上一轮的对话，除非你<strong>再发一遍</strong>，否则模型完全无从知晓。</p>
+  <p>这不是缺陷，而是一种简化设计：无状态的服务天然易于水平扩展、容错、负载均衡。代价则被转移给了调用方——<strong>"记忆"这件事，得由你自己负责。</strong></p>
+</div>
+
 <p>Claude Code 的答案朴素到近乎粗暴：<strong>用一个数组把所有说过的话都存起来，每轮结束追加新内容，下一轮把整个数组重新丢给模型。</strong>记忆不在模型里，而在调用方手里。这个数组，就是源码中 <code>State</code> 对象的 <code>messages</code> 字段（<code>query.ts:205</code>）：</p>
 
 <pre><code>// query.ts:205
@@ -1363,15 +1390,51 @@ state = next   // 下一轮迭代从这里读</code></pre>
 
 <h2 id="s1-2">1.2 ReAct 框架</h2>
 
-<p>有了状态载体，下一个问题是：<strong>循环每一圈到底按什么套路转？</strong>Claude Code 用的是业界公认的 ReAct 范式。</p>
+<p>有了状态载体，下一个问题是：<strong>循环每一圈到底按什么套路转？</strong>Claude Code 用的是业界公认的 <strong>ReAct 范式</strong>。要真正讲清楚 ReAct，得先认识它的"前身"——思维链 CoT。</p>
 
-<p>ReAct（Reasoning + Acting）由 Google 在 2022 年的论文提出，是当今几乎所有主流 Agent 框架的理论底座。它的核心洞见是：<strong>不要让模型一口气想完再行动，而是让"想"和"做"严格交替</strong>——每做一步，就把结果喂回去，让模型基于真实反馈想下一步。三个交替的动作是：</p>
+<div class="concept">
+  <div class="concept-label">概念 · 思维链 CoT</div>
+  <p><span class="term">思维链（Chain-of-Thought，CoT）</span>是一种提示技术：让模型在给出答案<em>之前</em>，先用自然语言把中间推理一步步"说出来"（经典触发语是"让我们一步步思考"）。由 Google 的 Wei 等人在 2022 年提出，它显著提升了大模型在数学、逻辑等复杂任务上的表现。</p>
+  <p><strong>但 CoT 有个致命短板：它只会"想"，不会"查"。</strong>模型闭着眼睛推理，中间步骤全靠记忆里的知识"脑补"，一旦某个事实记错，整条推理链就跟着错到底——这正是大模型"幻觉"的高发区。</p>
+</div>
+
+<p>ReAct 就是为补上这个短板而生的。</p>
+
+<div class="concept">
+  <div class="concept-label">概念 · ReAct 是什么</div>
+  <p><span class="term">ReAct（Reasoning + Acting，推理 + 行动）</span>是一种构建 AI 智能体的框架，核心是把 <strong>CoT 推理</strong> 和 <strong>调用外部工具的行动</strong> 交织起来：模型每"想"一步，就可以"做"一件事（查资料、调 API、执行命令），再把做的<strong>真实结果</strong>拿回来接着想。这样推理就不再是闭门造车，而是每一步都被真实世界的反馈"校准"。</p>
+  <p>它由 Shunyu Yao 等人（普林斯顿大学与 Google Research）在论文《ReAct: Synergizing Reasoning and Acting in Language Models》中提出（arXiv 2022 年 10 月首发，2023 年 ICLR 正式发表）。</p>
+</div>
+
+<p><strong>它从哪来：一个打包行李的类比。</strong>ReAct 的灵感来自人类怎么用"内心独白"处理复杂任务。想象你在为短途旅行打包：先冒出一个念头（<em>想</em>："目的地天气怎么样？"），于是去查天气预报（<em>做</em>），看到"会很冷"（<em>观察</em>）；这个观察引出下一个念头（<em>想</em>："我有哪些保暖衣服？"），你去翻衣柜（<em>做</em>），却发现"厚衣服都收在储藏室了"（<em>观察</em>，一个意外），于是再调整下一步。你不是照着一份僵死的清单执行，而是<strong>边想边做、根据新信息动态调整</strong>——这就是 ReAct 的精髓。</p>
+
+<p>落到形式上，ReAct 把智能体的活动组织成三个交替进行的动作：</p>
 
 <ul>
-  <li><strong>Thought（思考）</strong>——模型用自然语言推理当前局面，决定下一步干什么</li>
-  <li><strong>Action（行动）</strong>——模型发起一次工具调用（在 Claude API 里就是一个 <code>tool_use</code> block）</li>
-  <li><strong>Observation（观察）</strong>——工具执行结果以 <code>tool_result</code> 回注，模型"看到"结果，进入下一轮 Thought</li>
+  <li><strong>Thought（思考 / 推理）</strong>——就是 CoT 那一步：模型用自然语言把大任务拆成小步，想清楚下一步该干什么</li>
+  <li><strong>Action（行动）</strong>——模型发起一次工具调用（查搜索引擎、调 API、读知识库……；在 Claude API 里就是一个 <code>tool_use</code> block）</li>
+  <li><strong>Observation（观察）</strong>——把行动的<strong>真实结果</strong>喂回模型（在 Claude API 里就是 <code>tool_result</code>），它据此重新评估进展，决定是给出答案，还是进入下一轮 Thought</li>
 </ul>
+
+<p><strong>为什么非得这样交替，不能只想或只做？</strong>因为"只想"和"只做"各有致命缺陷，而 ReAct 恰好让一方补上另一方的短板：</p>
+
+<table>
+  <thead><tr><th>做法</th><th>问题所在</th></tr></thead>
+  <tbody>
+    <tr><td>只有推理（纯 CoT）</td><td>脱离真实信息，容易一本正经地<strong>胡编（幻觉）</strong></td></tr>
+    <tr><td>只有行动（无推理地堆工具调用）</td><td>不会规划、不会根据结果调整，遇到意外就卡死</td></tr>
+    <tr><td><strong>ReAct（推理 ⇄ 行动）</strong></td><td>推理有真实信息兜底 → <strong>更少幻觉、能适应意外、且推理过程可读可调试</strong></td></tr>
+  </tbody>
+</table>
+
+<p>正是这几点，让 ReAct 成了当今几乎所有主流 Agent（包括 Claude Code）的理论底座——它第一次让大模型从"会聊天"迈向"能自主解决问题"。</p>
+
+<div class="insight">
+  <div class="insight-label">重要澄清 · 别被"ReAct 提示"绕晕</div>
+  <p>你去看 ReAct 原论文或 LangChain 的 <code>ZERO_SHOT_REACT_DESCRIPTION</code>，会发现智能体是靠一段<strong>文本格式</strong>的提示词工作的——模型被要求逐字输出 <code>Thought: … / Action: … / Observation: …</code>，框架再用字符串解析把 Action 抠出来执行。这叫 <strong>ReAct 提示（ReAct prompting）</strong>。</p>
+  <p><strong>但 Claude Code 并不用这种文本格式。</strong>它走的是 Anthropic 的<strong>原生工具调用（function calling / tool use）</strong>：模型直接输出结构化的 <code>tool_use</code> block（带机器可读的 JSON 参数），无需靠正则去解析文本，更稳、更省 token。</p>
+  <p>所以要分清两层：<span class="role">ReAct</span>是"循环范式"（想→做→观察的反馈回路），<span class="role">function calling</span>是"行动的实现机制"。<strong>Claude Code = ReAct 的循环骨架 + function calling 的落地方式</strong>。这也解释了为什么你在 Claude Code 的消息里看不到 <code>Thought:</code> 这种文本——它把"想"和"做"编码进了结构化的 message，而不是纯文本。</p>
+</div>
 
 <p>三步一圈，循环往复，直到模型在某一轮的 Thought 里判断"任务完成了"，不再发出 Action 为止。Claude Code 的实现就是一个 <code>while(true)</code>（<code>query.ts:307</code>）——正是<strong>章首那张可以点的循环图</strong>。每次迭代严格对应一个完整的 Thought → Action → Observation 周期，落到源码是这六步：</p>
 
@@ -1416,7 +1479,13 @@ if (message.type === 'assistant') {
 
 <p>上一节说 <code>needsFollowUp</code> 是"在流式接收过程中"设置的——这句话背后是一个绕不开的机制：<strong>模型的输出不是一次性返回的，而是一条持续到达的流。</strong></p>
 
-<p>调用模型返回的是一条 SSE（Server-Sent Events）流，内容一块一块（block by block）陆续到达。Claude Code 的策略是：<strong>每拼装完一个 content block，就立刻把它 yield 出去</strong>，绝不等整条 message 收完。为什么要这么做？两个产品级的理由：</p>
+<div class="concept">
+  <div class="concept-label">概念 · SSE 流式响应</div>
+  <p><span class="term">SSE（Server-Sent Events，服务端推送事件）</span>是一种基于 HTTP 的单向流式协议：服务端不必等整个响应算完，而是一边生成一边把内容<strong>分成许多小事件</strong>持续推给客户端。大模型逐 token 生成文字，天然适合用 SSE 边生成边下发。</p>
+  <p><strong>为什么要流式，而不是算完一次性返回？</strong>一次完整回答可能要生成几十秒；若一次性返回，用户只能对着空白等待，也无法中途干预。流式则让"生成"和"消费"同时进行——这是下面两个产品级好处的技术前提。</p>
+</div>
+
+<p>Claude Code 收到的就是这样一条 SSE 流，内容一块一块（block by block）陆续到达。Claude Code 的策略是：<strong>每拼装完一个 content block，就立刻把它 yield 出去</strong>，绝不等整条 message 收完。为什么要这么做？两个产品级的理由：</p>
 
 <ul>
   <li><strong>体验</strong>——用户能看到文字一个字一个字冒出来，而不是盯着转圈等十几秒</li>
@@ -1462,7 +1531,13 @@ if (message.type === 'assistant') {
 
 <p>模型发出了 <code>tool_use</code>，Claude Code 执行完工具，拿到了结果——现在轮到最后一个环节：<strong>怎么把结果还给模型？</strong></p>
 
-<p>答案里藏着一个初学者常觉得"反直觉"的协议约定：工具结果不是以某种"系统消息"或"函数返回"的身份传回，而是被包装成 <code>tool_result</code> block、<strong>以 user（用户）角色</strong>追加进消息列表。这是 Anthropic API 的强制协议：每个 <code>tool_use</code> 必须有一个 <code>tool_use_id</code> 完全相同的 <code>tool_result</code> 与之配对，且必须紧跟在那条 assistant 消息之后。</p>
+<div class="concept">
+  <div class="concept-label">概念 · 工具调用协议</div>
+  <p>Anthropic 的<span class="term">工具调用协议</span>规定了一次工具往返的固定形态：模型在 assistant 消息里发出一个 <code>tool_use</code> block（含唯一的 <code>id</code>、工具名 <code>name</code>、参数 <code>input</code>）；调用方执行后，必须回一个 <code>tool_result</code> block，并用 <code>tool_use_id</code> 指回刚才那个 <code>id</code>。</p>
+  <p><strong>为什么要这么严格？</strong>因为模型是无状态的（回顾 1.1）——它不"记得"自己发过哪个调用，只能靠消息里的 <code>id</code> 把"我问的"和"你答的"对上号。这个协议就是模型和调用方之间的一纸契约。</p>
+</div>
+
+<p>而这纸契约里，藏着一个初学者常觉得"反直觉"的约定：工具结果不是以某种"系统消息"或"函数返回"的身份传回，而是被包装成 <code>tool_result</code> block、<strong>以 user（用户）角色</strong>追加进消息列表。这是 Anthropic API 的强制协议：每个 <code>tool_use</code> 必须有一个 <code>tool_use_id</code> 完全相同的 <code>tool_result</code> 与之配对，且必须紧跟在那条 assistant 消息之后。</p>
 
 <p>下面是一次完整 ReAct 循环之后，<code>messages</code> 数组的真实形态（顺便演示 1.3 说的"一轮里发起多个工具调用"）：</p>
 
@@ -1561,6 +1636,12 @@ if (message.type === 'assistant') {
 <h2 id="s1-5">1.5 maxTurns 熔断与全部退出路径</h2>
 
 <p>循环的正常出口只有一个：模型不再发 tool_use（<code>completed</code>）。但"正常"是理想情况——万一模型陷入死循环，一遍遍调工具却始终给不出结论呢？任何 <code>while(true)</code> 都必须配一个<strong>熔断闸</strong>，否则就是一颗定时炸弹。这就是 <code>maxTurns</code>。</p>
+
+<div class="concept">
+  <div class="concept-label">概念 · 熔断 circuit breaker</div>
+  <p><span class="term">熔断（circuit breaker）</span>这个词借自电路里的保险丝：当电流超过安全阈值，保险丝主动熔断，牺牲局部来保住整体。软件里沿用了这个思想——给一个可能失控的过程设一道硬性上限，一旦触及就<strong>强制停止</strong>，用一个可控的失败，换掉一个不可控的灾难（无限循环、账单爆炸、资源耗尽）。</p>
+  <p>在 ReAct 智能体里，"该在什么时候、用什么条件结束循环"本就是一个核心设计问题。设一个最大迭代次数（<code>maxTurns</code>）是最简单直接的一种熔断手段。</p>
+</div>
 
 <p>先说清 <code>turnCount</code> 的语义，它容易被误解：它从 <strong>1</strong> 起步，含义是"即将向模型发起第几次调用"——初始用户请求是 turn 1，第一次工具 follow-up 是 turn 2，以此类推。每当有工具结果、循环准备再转一圈时，在末尾 +1 并检查上限（<code>query.ts:1705</code>）：</p>
 
@@ -2043,7 +2124,7 @@ while True:                # 1.2 ReAct 主循环          query.ts:307
 
   // 生成式逐段显示效果
   function revealContent(container) {
-    const blocks = container.querySelectorAll('p, h2, pre, ul, ol, hr, .goal-card, .insight, .figure, table, .page-nav');
+    const blocks = container.querySelectorAll('p, h2, pre, ul, ol, hr, .goal-card, .insight, .concept, .figure, table, .page-nav');
     blocks.forEach((el, i) => {
       el.style.opacity = '0';
       el.style.transform = 'translateY(10px)';

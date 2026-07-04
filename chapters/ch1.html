@@ -153,7 +153,7 @@
 
 <h2 id="s1-1">1.1 消息列表作为状态载体</h2>
 
-<p>先问第一个根本问题：<strong>Agent 的"记忆"存在哪里？</strong></p>
+<p>我们从上面那张图里最右边的一列——<code>messages[]</code>——开始拆。先问第一个根本问题：<strong>Agent 的"记忆"存在哪里？</strong></p>
 
 <p>这个问题之所以关键，是因为大模型有一个反直觉的特性——<strong>它是无状态的</strong>。每次调 API 都是一次全新的、互不相识的请求，模型不会"记得"上一轮你们聊了什么。那多轮对话里的上下文靠什么活下去？</p>
 
@@ -167,7 +167,7 @@
 
 <pre><code>// query.ts:205
 type State = {
-  messages: Message[]   // ← 完整对话历史，Agent 唯一真正持久的状态
+  messages: Message[]   // ← 本次请求的完整对话历史（跨请求的持久存储见本节末尾）
   turnCount: number     // 轮次计数（1.5 节讲）
   // ...还有 8 个字段，全是"恢复机制"的账本，下面解释
 }</code></pre>
@@ -248,6 +248,13 @@ state = next   // 下一轮迭代从这里读</code></pre>
   <div class="insight-label">设计启示</div>
   <p><span class="role">给开发者</span>把"状态"和"计算"彻底分离：模型负责无状态的计算，状态收敛到调用方的一个数组里。这带来三个白捡的好处——可持久化（存下数组就能续上对话，见第八章 Session）、可回放（重放数组就能复现任何一轮）、可裁剪（要省 token，动数组就行）。凡是你自己要设计的 Agent，第一件事就是想清楚"状态数组长什么样"。</p>
   <p><span class="role">给产品经理</span>"AI 记不住上文"从来不是模型缺陷，而是产品有没有把历史完整带上的工程选择。当你评估一个 Agent 产品的上下文能力时，真正该问的是："它的历史数组保留策略是什么？超长了怎么裁？"——这决定了体验的连贯性上限。</p>
+</div>
+
+<div class="concept">
+  <div class="concept-label">概念 · QueryEngine 与 queryLoop 的层级关系</div>
+  <p>上面"messages 是 Agent 记忆的载体"这句话需要补一个精确边界：<code>query.ts</code> 里的 <code>State.messages</code>，只是<strong>一次用户请求期间</strong>的工作副本，不是跨越整个会话、真正持久存在的那份记忆。持续跨越"用户发第 1 条消息、第 2 条……"存在的容器，是更外层的 <code>QueryEngine</code>（<code>QueryEngine.ts:184</code>）——它的实例字段 <code>mutableMessages</code>（<code>QueryEngine.ts:202</code>）才是会话级、贯穿整个 QueryEngine 生命周期的历史。</p>
+  <p>两者的分工：用户每发一条消息，<code>QueryEngine</code> 先把它 <code>push</code> 进 <code>mutableMessages</code>（<code>QueryEngine.ts:431</code>），再复制一份快照传给 <code>query()</code>（<code>QueryEngine.ts:434, 675</code>）——这才是本章讲的 <code>while(true)</code> ReAct 循环，只为这一条用户消息运行，内部可能转很多轮工具调用，但终归以 <code>completed</code> 退出。循环每 yield 一条消息，<code>QueryEngine</code> 就把它追加回 <code>mutableMessages</code>（<code>QueryEngine.ts:768</code> 等处）；下一条用户消息到来时，再重复这个过程。</p>
+  <p>所以严格地说：<strong>本章后面 1.5 节讲的 <code>turnCount</code>，数的是"一次用户请求内部的工具调用轮数"，不是"聊了几条消息"</strong>——这是两个不同量级的计数，很容易被默认成同一件事。第一章聚焦的，是 <code>QueryEngine</code> 每次调用里的这一段 <code>queryLoop</code>；<code>QueryEngine</code> 本身如何管理跨请求的会话生命周期，属于第八章 Session 持久化的话题。</p>
 </div>
 
 <h2 id="s1-2">1.2 ReAct 框架</h2>

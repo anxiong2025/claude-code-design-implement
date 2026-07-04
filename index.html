@@ -1202,7 +1202,7 @@
 <div class="chapter-eyebrow">第一章</div>
 <h1>Agent Loop——内核</h1>
 
-<p>如<a href="javascript:showPage('cover')" style="color:var(--accent)">简介中的架构图（Claude Code · Architecture）</a>所示，L1 层只有两个构成要素：<strong>一个 while 循环，一个只增不减的消息数组</strong>。L2 Harness、工具系统、多 Agent 编排均以 L1 为核心依赖——它们的存在是为了让这个循环运行得更稳定、更持久、更具扩展性。本章先将 L1 的结构与设计原因讲清楚，后续各章的分析才有基准。</p>
+<p>如<a href="javascript:showPage('cover')" style="color:var(--accent)">简介中的架构图（Claude Code · Architecture）</a>所示，Agent Loop（ReAct 推理循环）只有两个构成要素：<strong>一个 while 循环，一个只增不减的消息数组</strong>。Harness 运行时、工具系统、多 Agent 编排均以此循环为核心依赖——它们的存在是为了让这个循环运行得更稳定、更持久、更具扩展性。本章先将 Agent Loop 的结构与设计原因讲清楚，后续各章的分析才有基准。</p>
 
 <p>要理解为什么需要这样一个循环，需要先明确一个前提：<strong>LLM 本身是无状态的</strong>——每次 API 调用相互独立，模型不保留上次调用的任何信息。对于"找出项目里所有 TODO 并逐一修复"这类需要十几步工具调用的任务，单次调用显然不够，需要一套机制驱动模型持续执行直到任务完成。</p>
 

@@ -283,7 +283,29 @@
     font-size: 12.5px;
     line-height: 1.6;
     color: var(--ink);
+    position: relative;
   }
+
+  .copy-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: var(--bg);
+    border: 1px solid var(--sidebar-border);
+    border-radius: 5px;
+    padding: 3px 9px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink2);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s;
+    z-index: 2;
+    line-height: 1.6;
+  }
+  pre:hover .copy-btn { opacity: 1; }
+  .copy-btn:hover { background: var(--code-bg); color: var(--ink); }
+  .copy-btn.copied { color: #1F8F5F; border-color: #1F8F5F; opacity: 1; }
 
   /* 目标卡片 */
   .goal-card {
@@ -1178,62 +1200,66 @@
 <!-- ══ 章节内容（内联，避免 file:// 协议 fetch 限制）══ -->
 <template id="tpl-ch1">
 <div class="chapter-eyebrow">第一章</div>
-<h1>Agent Loop（核心循环）</h1>
+<h1>Agent Loop——内核</h1>
 
-<h2>引言 · 什么是 Agent，Claude Code 为什么需要它</h2>
+<p>封面那张架构图里，L1 这层只有两样东西：<strong>一个 while 循环，一个只增不减的消息数组</strong>。所有其他层——Harness、工具系统、多 Agent——都是为了让这个循环能更稳、跑更久、跑更多而存在的外壳。本章先把内核讲透，后续每章才有基准。</p>
 
-<p>在进入源码之前，需要先在同一套术语上达成一致——本书后续七章的讨论都建立在这一节的定义之上。</p>
+<p>先把问题说清楚，再看代码：<strong>LLM 本身是无状态的</strong>——每次 API 调用都是独立的，模型不记得上次说了什么，调用结束它就消失了。那怎么做"帮我找出项目里所有 TODO，逐一修完再汇总"这种需要十几步工具调用的任务？</p>
 
-<div class="concept">
-  <div class="concept-label">概念 · Agent（智能体）</div>
-  <p><span class="term">Agent</span> 在人工智能领域有明确的经典定义（Russell &amp; Norvig，《人工智能：一种现代方法》）：能够通过传感器感知环境、并通过执行器作用于环境以实现既定目标的系统。移植到大语言模型场景，这个定义可以具体化为：<strong>一个以 LLM 为决策核心，按"感知 → 决策 → 行动"循环自主完成多步任务，并能依据行动的真实反馈动态调整后续步骤的系统。</strong></p>
-  <p>这个定义包含三个必要条件，任一条件不满足都不构成 Agent：<strong>多步</strong>（而非一问一答）、<strong>自主决策</strong>（而非固定脚本）、<strong>能感知行动反馈</strong>（而非盲目执行预设步骤）。</p>
-</div>
+<p>答案只需要 25 行 Python，下面就是整个 Agent 的骨架：</p>
 
-<p>这三个条件划出了 Agent 与另外两类系统的边界：</p>
+<pre><code class="language-python"># 这 25 行就是 Claude Code src/query.ts 的最小骨架
+# 后面五节会逐行解释每处设计背后的 "为什么"
 
-<table>
-  <thead><tr><th>系统类型</th><th>交互结构</th><th>能否感知环境反馈</th><th>能否自主多步决策</th></tr></thead>
-  <tbody>
-    <tr><td>传统程序</td><td>预定义的确定性指令序列</td><td>否 —— 没有"环境"概念，只有内部状态转移</td><td>否</td></tr>
-    <tr><td>Chatbot / 单次 LLM 调用</td><td>一次 request，一次 response</td><td>否 —— 生成结束即终止，无后续观察</td><td>否</td></tr>
-    <tr><td><strong>Agent</strong></td><td>感知 → 决策 → 行动 → 观察，循环往复</td><td><strong>是</strong> —— 工具执行结果被重新注入决策过程</td><td><strong>是</strong> —— 由模型自主判断何时继续、何时终止</td></tr>
-  </tbody>
-</table>
+import anthropic, json
 
-<p>Claude Code 要解决的核心工程问题，正是让表格最后一行成立：把一次性的 LLM 调用，改造成一个能自主运行多步、且行为会被真实反馈持续修正的系统。1.2 节会看到，"感知 → 决策 → 行动"这个循环在学术上有一个更精确的名字——ReAct。</p>
+client = anthropic.Anthropic()
+TOOLS = [{"name": "bash", "description": "执行 shell 命令", "input_schema": {
+    "type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]
+}}]
 
-<h2>Claude Code 的分层设计：从内核到外围</h2>
+def run_tool(name, input):        # ④ 工具执行（1.4 节）
+    if name == "bash":
+        import subprocess
+        return subprocess.run(input["cmd"], shell=True, capture_output=True, text=True).stdout
 
-<p>Claude Code 不是一次性设计出的整体系统，而是围绕一个不可再分的内核——本章要讲的 Agent Loop——逐层向外扩展而成。每一层不替代内层，只为内层提供更强的能力，或更安全的边界：</p>
+def agent_loop(user_msg, max_turns=10):
+    messages = [{"role": "user", "content": user_msg}]   # ① 状态载体（1.1 节）
+    turn = 0
+    while True:                                            # ② while(true)（1.2 节）
+        resp = client.messages.create(                     # ③ 调模型（1.3 节）
+            model="claude-opus-4-8", max_tokens=4096,
+            tools=TOOLS, messages=messages, stream=True
+        )
+        blocks, tool_uses = [], []
+        for event in resp:                                 # ③ 流式逐块接收
+            if hasattr(event, "content_block"):
+                blocks.append(event.content_block)
+            elif hasattr(event, "delta") and event.delta.type == "input_json_delta":
+                blocks[-1].input = getattr(blocks[-1], "input", "") + event.delta.partial_json
+        for b in blocks:
+            if b.type == "tool_use":
+                tool_uses.append(b)                        # ③ 亲眼见到 tool_use 才算数
+        if not tool_uses:                                  # ② 唯一正常出口
+            return next(b.text for b in blocks if b.type == "text")
+        results = [{"type": "tool_result", "tool_use_id": b.id,  # ④ 结果配对
+                    "content": run_tool(b.name, json.loads(b.input))} for b in tool_uses]
+        messages += [{"role": "assistant", "content": blocks},    # ① 三段拼接
+                     {"role": "user",      "content": results}]
+        turn += 1
+        if turn >= max_turns:                              # ⑤ 熔断（1.5 节）
+            return f"[已达最大轮次 {max_turns}，任务未完成]"
 
-<table>
-  <thead><tr><th>层级</th><th>名称</th><th>职责</th><th>对应章节</th></tr></thead>
-  <tbody>
-    <tr><td><code>L0</code></td><td>模型 / LLM</td><td>无状态的推理引擎——接收消息数组，输出下一步的文本或工具调用</td><td>—</td></tr>
-    <tr><td><code>L1</code></td><td>Agent Loop（ReAct 循环）</td><td>赋予 L0 多轮"感知 → 决策 → 行动"的能力</td><td><strong>第一章（本章）</strong></td></tr>
-    <tr><td>—</td><td>Tool 接口 · Skills · MCP</td><td>扩大 L1"行动"的边界：Tool 定义模型能调用什么；Skills 把常见任务打包成可复用的提示 + 工具组合；MCP 统一接入任意外部工具与数据源</td><td>第三章</td></tr>
-    <tr><td><code>L2</code></td><td>Harness 运行时</td><td>包裹 Loop 的执行引擎：组装 Prompt、控制 Token 预算、压缩上下文，让循环能长时间稳定运行</td><td>第二章</td></tr>
-    <tr><td><code>L3</code></td><td>多 Agent 编排</td><td>本质是 L2 递归调用自身——每个子 Agent 是一次独立的 L1+L2 实例，而非新增的调度层</td><td>第四、五、六章</td></tr>
-    <tr><td>横切</td><td>权限与安全 · Session 持久化</td><td>贯穿 L0–L3 的全部层级，不属于任何单一层</td><td>第七、八章</td></tr>
-  </tbody>
-</table>
-
-<p>本章对应上表中的 <code>L1</code>。从这里讲起不是任意的行文选择，而是由这套架构本身的依赖方向决定的：<strong>L2 的全部复杂性（Prompt 组装、Token 预算、上下文压缩、各类错误恢复）都是为了让 L1 这个循环能长时间、稳定地存活；L3 的多 Agent 编排，本质上只是让多个 L1+L2 实例并发运行。</strong>L1 是这套架构里唯一"被所有外层依赖、自身却不依赖任何外层"的原语——不先建立对它的准确理解，后续每一章要解决的问题都失去了对照的基准。</p>
+print(agent_loop("列出当前目录的所有 .py 文件，并统计总行数"))</code></pre>
 
 <div class="goal-card">
   <div class="goal-card-label">本章目标</div>
-  <p>把一句"用户请求"变成"能自己调工具、自己判断何时收工、最后给出结论"的 Agent。读完这章，你会掌握所有 Agent 系统最底层、也最不可省略的那个结构——<strong>循环</strong>，并能对照 Claude Code 真实源码写出一个可运行的单 Agent。</p>
+  <p>把上面这 25 行的每一处设计决策讲透，并对照 Claude Code 源码（<code>src/query.ts</code>）解释为什么这样而不是那样。读完这章，你看 <code>query.ts</code> 里 1700 行的代码，会发现它们几乎都是在处理"如果这个 25 行骨架在生产环境跑会出什么问题"。</p>
 </div>
 
-<p>结合上文的分层定义，本章的核心内容可以先给出一个精确表述，作为贯穿全书的形式化心智模型：</p>
+<p>五个小节，对应骨架里的五个标注：状态存在哪（① 1.1）、循环为何是 while true（② 1.2）、流式输出如何逐块接住（③ 1.3）、工具结果如何还给模型（④ 1.4）、循环怎么安全停下来（⑤ 1.5）。</p>
 
-<div class="insight">
-  <div class="insight-label">形式化定义 · Agent Loop（L1）的最小实现</div>
-  <p>一个 <strong>Agent Loop 就是「一个 while 循环 + 一个只增不减的消息数组」</strong>。循环每迭代一次，即完成一次决策：调用模型判断下一步——发起工具调用（Action，循环继续），或产出最终响应（循环终止）。决策能力完全由模型提供；Claude Code 这层工程代码的职责，仅限于<strong>让该循环安全、可恢复、可中断地运行</strong>。</p>
-</div>
-
-<p>下面这张图就是这句话的动画版——<strong>点「下一步」</strong>，跟着走完一个完整的两轮对话，看左边的控制流怎么循环、右边的 <code>messages[]</code> 怎么逐轮长大。本章接下来的每一节，都是在拆解这张图里的某一步。</p>
+<p>先跑起来看看效果——</p>
 
 <div class="figure ch1-player" data-step="0">
   <div class="figure-head">
@@ -1328,21 +1354,108 @@
   </div>
 </div>
 
-<p>本章的五个小节，就是把这句话拆成五个必须回答的工程问题：状态存在哪（1.1）、循环按什么范式转（1.2）、模型的输出怎么实时接住（1.3）、工具结果怎么还给模型（1.4）、循环怎么安全地停下来（1.5）。</p>
+<div class="figure ch1-player" data-step="0">
+  <div class="figure-head">
+    <span class="figure-tag">交互 · 可点击</span>
+    <span class="figure-title">ReAct 循环播放器 <span class="hint">— 走完一次「调工具 → 出答案」的完整循环</span></span>
+  </div>
+  <svg viewBox="0 0 720 400" role="img" aria-label="ReAct 循环交互图">
+    <style>
+      .f1 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f1 .nbox{fill:#fffefb;stroke:#d9d3c7;stroke-width:1.4}
+      .f1 .ntxt{font-size:14px;font-weight:600;fill:#3a3326}
+      .f1 .nsub{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;fill:#9a8f7b}
+      .f1 .lbl{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;fill:#6e6353}
+      .f1 .flow{stroke:#c3bcae;stroke-width:1.6;fill:none}
+      .f1 .msgttl{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;fill:#9a8f7b;letter-spacing:.04em}
+      .f1 .mtxt{font-size:12px;font-weight:600;fill:#fff}
+      .f1 .mtag{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;fill:#fff;opacity:.85}
+    </style>
+    <defs><marker id="ch1arrow" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#c3bcae"/></marker></defs>
+    <g class="f1">
+      <rect x="76" y="20" width="196" height="34" rx="17" fill="#2563EB"/>
+      <text x="174" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">用户输入</text>
+      <line class="flow" x1="174" y1="54" x2="174" y2="90" marker-end="url(#ch1arrow)"/>
 
-<h2 id="s1-1">1.1 消息列表作为状态载体</h2>
+      <rect x="24" y="72" width="300" height="304" rx="14" fill="none" stroke="#6D45C9" stroke-width="1.4" stroke-dasharray="5 4" opacity=".5"/>
+      <text x="36" y="90" class="lbl" fill="#6D45C9">while (true)</text>
 
-<p>我们从上面那张图里最右边的一列——<code>messages[]</code>——开始拆。先问第一个根本问题：<strong>Agent 的"记忆"存在哪里？</strong></p>
+      <g class="ch1-node" id="ch1-n-model">
+        <rect class="nbox" x="76" y="98" width="196" height="48" rx="10"/>
+        <text class="ntxt" x="174" y="119" text-anchor="middle">调用模型 · Thought</text>
+        <text class="nsub" x="174" y="135" text-anchor="middle">流式接收 · 逐块解析</text>
+      </g>
+      <line class="flow" x1="174" y1="146" x2="174" y2="168" marker-end="url(#ch1arrow)"/>
 
-<p>这个问题之所以关键，是因为大模型有一个反直觉的特性——<strong>它是无状态的</strong>。每次调 API 都是一次全新的、互不相识的请求，模型不会"记得"上一轮你们聊了什么。那多轮对话里的上下文靠什么活下去？</p>
+      <g class="ch1-node" id="ch1-n-decide">
+        <rect class="nbox" x="94" y="170" width="160" height="44" rx="10"/>
+        <text class="ntxt" x="174" y="197" text-anchor="middle">有 tool_use？</text>
+      </g>
+      <line class="flow" x1="174" y1="214" x2="174" y2="240" marker-end="url(#ch1arrow)"/>
+      <text x="182" y="234" class="lbl" fill="#1F8F5F">是 ↓</text>
 
-<div class="concept">
-  <div class="concept-label">概念 · 无状态 stateless</div>
-  <p><span class="term">无状态（stateless）</span>指的是：服务端不为你保存任何"上一次"的信息，每一次请求都被当作第一次、独立处理。大模型 API 就是典型的无状态服务——你这次发的请求里包含什么，它就只能看到什么；上一轮的对话，除非你<strong>再发一遍</strong>，否则模型完全无从知晓。</p>
-  <p>这不是缺陷，而是一种简化设计：无状态的服务天然易于水平扩展、容错、负载均衡。代价则被转移给了调用方——<strong>"记忆"这件事，得由你自己负责。</strong></p>
+      <g class="ch1-node" id="ch1-n-act">
+        <rect class="nbox" x="76" y="242" width="196" height="44" rx="10"/>
+        <text class="ntxt" x="174" y="269" text-anchor="middle">执行工具 · Action</text>
+      </g>
+      <line class="flow" x1="174" y1="286" x2="174" y2="310" marker-end="url(#ch1arrow)"/>
+
+      <g class="ch1-node" id="ch1-n-obs">
+        <rect class="nbox" x="66" y="312" width="216" height="46" rx="10"/>
+        <text class="ntxt" x="174" y="333" text-anchor="middle">注入 tool_result</text>
+        <text class="nsub" x="174" y="349" text-anchor="middle">Observation · user 角色</text>
+      </g>
+      <path class="flow" d="M66,335 C 40,335 34,318 34,248 L34,130 C34,122 40,121 76,122" marker-end="url(#ch1arrow)"/>
+      <text x="20" y="238" class="lbl" transform="rotate(-90 20 238)" fill="#6D45C9">continue ⟳</text>
+
+      <path class="flow" d="M254,192 L348,192" marker-end="url(#ch1arrow)"/>
+      <text x="300" y="184" text-anchor="middle" class="lbl" fill="#C77D2B">否</text>
+      <g class="ch1-node" id="ch1-n-done">
+        <rect class="nbox" x="348" y="170" width="150" height="44" rx="10" style="stroke:#1F8F5F"/>
+        <text class="ntxt" x="423" y="197" text-anchor="middle" fill="#1F8F5F">return completed</text>
+      </g>
+
+      <text x="520" y="40" class="msgttl">messages[]  ↓ 逐轮追加</text>
+      <g class="ch1-msg" id="ch1-msg-0">
+        <rect x="520" y="52" width="176" height="42" rx="9" fill="#2563EB"/>
+        <text class="mtag" x="532" y="70">role: user</text>
+        <text class="mtxt" x="532" y="86">查询请求</text>
+      </g>
+      <g class="ch1-msg" id="ch1-msg-1">
+        <rect x="520" y="100" width="176" height="42" rx="9" fill="#6D45C9"/>
+        <text class="mtag" x="532" y="118">role: assistant</text>
+        <text class="mtxt" x="532" y="134">text + tool_use</text>
+      </g>
+      <g class="ch1-msg" id="ch1-msg-2">
+        <rect x="520" y="148" width="176" height="42" rx="9" fill="#1F8F5F"/>
+        <text class="mtag" x="532" y="166">role: user</text>
+        <text class="mtxt" x="532" y="182">tool_result</text>
+      </g>
+      <g class="ch1-msg" id="ch1-msg-3">
+        <rect x="520" y="196" width="176" height="42" rx="9" fill="#6D45C9"/>
+        <text class="mtag" x="532" y="214">role: assistant</text>
+        <text class="mtxt" x="532" y="230">最终答案</text>
+      </g>
+    </g>
+  </svg>
+  <div class="figure-cap">初始状态：用户输入进入，messages = [ user ]。循环即将开始。</div>
+  <div class="figure-ctl">
+    <span class="figure-badge">START</span>
+    <button class="figure-btn" onclick="ch1Next(this)">下一步 ▶</button>
+    <button class="figure-btn ghost" onclick="ch1Reset(this)">⟲ 重置</button>
+    <span class="figure-progress">1 / 8</span>
+  </div>
 </div>
 
-<p>Claude Code 的答案朴素到近乎粗暴：<strong>用一个数组把所有说过的话都存起来，每轮结束追加新内容，下一轮把整个数组重新丢给模型。</strong>记忆不在模型里，而在调用方手里。这个数组，就是源码中 <code>State</code> 对象的 <code>messages</code> 字段（<code>query.ts:205</code>）：</p>
+<h2 id="s1-1">1.1 ① 消息数组——Agent 的唯一记忆</h2>
+
+<p>骨架第一行：</p>
+
+<pre><code class="language-python">messages = [{"role": "user", "content": user_msg}]   # ① 状态载体</code></pre>
+
+<p>为什么要这么一个数组？因为 <strong>LLM 是无状态服务</strong>——每次 API 调用都是独立的，模型不记得上次你们说了什么。你发什么，它就只看到什么，上一轮的内容除非你重新带过去否则它完全不知道。</p>
+
+<p>所以 Claude Code 的做法朴素到近乎粗暴：<strong>把所有说过的话全存进一个数组，每轮追加新内容，下一轮把整个数组重新发给模型</strong>。记忆不在模型里，在调用方手里。对应源码：</p>
 
 <pre><code>// query.ts:205
 type State = {
@@ -1436,9 +1549,15 @@ state = next   // 下一轮迭代从这里读</code></pre>
   <p>所以严格地说：<strong>本章后面 1.5 节讲的 <code>turnCount</code>，数的是"一次用户请求内部的工具调用轮数"，不是"聊了几条消息"</strong>——这是两个不同量级的计数，很容易被默认成同一件事。第一章聚焦的，是 <code>QueryEngine</code> 每次调用里的这一段 <code>queryLoop</code>；<code>QueryEngine</code> 本身如何管理跨请求的会话生命周期，属于第八章 Session 持久化的话题。</p>
 </div>
 
-<h2 id="s1-2">1.2 ReAct 框架</h2>
+<h2 id="s1-2">1.2 ② while(true)——为什么是无界循环</h2>
 
-<p>有了状态载体，下一个问题是：<strong>循环每一圈到底按什么套路转？</strong>Claude Code 用的是业界公认的 <strong>ReAct 范式</strong>。要真正讲清楚 ReAct，得先认识它的"前身"——思维链 CoT。</p>
+<p>骨架里：</p>
+
+<pre><code class="language-python">while True:   # ② 循环本体，不设上界是刻意的</code></pre>
+
+<p>为什么不是 <code>for i in range(max_turns)</code>？因为<strong>不知道要转几圈才能完成任务</strong>——这由模型决定，不由框架预设。这个"边想边做边根据结果调整"的范式叫 <strong>ReAct</strong>，来自 2022 年 Yao 等人的论文，它解决了纯 CoT 推理的致命问题：模型闭眼脑补容易产生幻觉，而 ReAct 每一步都拿真实结果"校准"。</p>
+
+<p>要真正讲清楚 ReAct，得先认识它的"前身"——思维链 CoT。</p>
 
 <div class="concept">
   <div class="concept-label">概念 · 思维链 CoT</div>
@@ -1523,9 +1642,17 @@ if (message.type === 'assistant') {
   <p><span class="role">给开发者</span>这是一条能迁移到任何系统的防御式设计原则：<strong>控制流的判据，优先用"你亲自观测到的事实"，而不是"上游承诺的元数据"。</strong>元数据可能缺失、可能语义漂移、可能因协议升级而失真；而"我这轮到底解析出没有工具调用"是确定的。你自己写 Agent 时，别把循环命脉押在 <code>stop_reason</code> 上。</p>
 </div>
 
-<h2 id="s1-3">1.3 流式响应的逐块处理</h2>
+<h2 id="s1-3">1.3 ③ 流式逐块接收——为什么不能等全量</h2>
 
-<p>上一节说 <code>needsFollowUp</code> 是"在流式接收过程中"设置的——这句话背后是一个绕不开的机制：<strong>模型的输出不是一次性返回的，而是一条持续到达的流。</strong></p>
+<p>骨架里调模型时传了 <code>stream=True</code>，然后逐事件遍历：</p>
+
+<pre><code class="language-python">for event in resp:                                 # ③ 流式逐块接收
+    if hasattr(event, "content_block"):
+        blocks.append(event.content_block)
+    elif hasattr(event, "delta") and event.delta.type == "input_json_delta":
+        blocks[-1].input = getattr(blocks[-1], "input", "") + event.delta.partial_json</code></pre>
+
+<p>为什么不直接用非流式、等模型输出全了再处理？两个原因：<strong>体验</strong>——用户能看到文字逐字出现；<strong>可中断</strong>——用户随时 Ctrl+C，在下一个 block 边界干净停下来。这个机制背后是一个绕不开的协议：</p>
 
 <div class="concept">
   <div class="concept-label">概念 · SSE 流式响应</div>
@@ -1575,9 +1702,16 @@ if (message.type === 'assistant') {
   <p><span class="role">给产品经理</span>"流式输出"不是锦上添花的动效，而是 Agent 可交互性的地基。有了逐块流，才谈得上"实时展示进度""随时打断""看着它一步步干活"这些让 Agent 从黑盒变成协作者的体验。评估 Agent 产品时，"能不能中途喊停、喊停后状态是否干净"是一条硬指标。</p>
 </div>
 
-<h2 id="s1-4">1.4 工具调用结果注入</h2>
+<h2 id="s1-4">1.4 ④ 工具结果注入——为什么是 user 角色</h2>
 
-<p>模型发出了 <code>tool_use</code>，Claude Code 执行完工具，拿到了结果——现在轮到最后一个环节：<strong>怎么把结果还给模型？</strong></p>
+<p>骨架里执行完工具后这样构造结果：</p>
+
+<pre><code class="language-python">results = [{"type": "tool_result", "tool_use_id": b.id,   # ④ 靠 id 配对
+            "content": run_tool(b.name, json.loads(b.input))} for b in tool_uses]
+messages += [{"role": "assistant", "content": blocks},    # ① 拼回数组
+             {"role": "user",      "content": results}]   # tool_result 是 user 角色！</code></pre>
+
+<p>初学者最困惑的地方：工具结果为什么是 <strong>user 角色</strong>而不是 system 或 function？模型发出了 <code>tool_use</code>，现在轮到最后一个环节：<strong>怎么把结果还给模型？</strong></p>
 
 <div class="concept">
   <div class="concept-label">概念 · 工具调用协议</div>
@@ -1681,9 +1815,15 @@ if (message.type === 'assistant') {
   <p><span class="role">给开发者</span>注意这个协议设计的精妙：用 <code>tool_use_id</code> 做配对，而不依赖顺序。正因如此，多个工具才能乱序并发、谁先返回都不影响正确性——只要 id 对得上就能归位。你设计任何"发起—回执"式的异步接口时，都值得学这一招：<strong>用显式 ID 配对，而非隐式顺序。</strong></p>
 </div>
 
-<h2 id="s1-5">1.5 maxTurns 熔断与全部退出路径</h2>
+<h2 id="s1-5">1.5 ⑤ 熔断与全部退出路径</h2>
 
-<p>循环的正常出口只有一个：模型不再发 tool_use（<code>completed</code>）。但"正常"是理想情况——万一模型陷入死循环，一遍遍调工具却始终给不出结论呢？任何 <code>while(true)</code> 都必须配一个<strong>熔断闸</strong>，否则就是一颗定时炸弹。这就是 <code>maxTurns</code>。</p>
+<p>骨架末尾：</p>
+
+<pre><code class="language-python">turn += 1
+if turn >= max_turns:                              # ⑤ 熔断
+    return f"[已达最大轮次 {max_turns}，任务未完成]"</code></pre>
+
+<p>循环的正常出口只有一个：模型不再发 tool_use（<code>completed</code>）。但万一模型陷入死循环，一遍遍调工具却始终给不出结论呢？任何 <code>while(true)</code> 都必须配一个<strong>熔断闸</strong>，否则就是定时炸弹。这就是 <code>maxTurns</code>（Python 骨架里的 <code>max_turns</code>，源码里的 <code>maxTurns</code> 参数）。</p>
 
 <div class="concept">
   <div class="concept-label">概念 · 熔断 circuit breaker</div>
@@ -1794,34 +1934,34 @@ if (maxTurns && nextTurnCount > maxTurns) {
 
 <hr>
 
-<h2>本章代码</h2>
+<h2>本章代码与源码对照</h2>
 
-<p>完整实现在 <code>code/examples/loop_demo.py</code>，把本章五个机制逐一落地：State 对象、ReAct 循环、流式接收、tool_result 注入、maxTurns 熔断。它足够短，你可以一行行读完。</p>
+<p>章首那 25 行骨架已经是可运行代码（设置 <code>ANTHROPIC_API_KEY</code> 后直接跑）。完整版在 <code>code/examples/loop_demo.py</code>，加了错误处理和更详细的注释：</p>
 
-<pre><code># 运行（需先设置 ANTHROPIC_API_KEY）
+<pre><code class="language-bash"># 运行（需先设置 ANTHROPIC_API_KEY）
 cd code
 uv run python examples/loop_demo.py</code></pre>
 
-<p>骨架与源码的对应关系——这张对照表就是本章的一页纸总结：</p>
+<p>骨架每行与 <code>src/query.ts</code> 源码的对应关系——这张表就是本章一页纸总结：</p>
 
-<pre><code># loop_demo.py 骨架                         ←→  src/query.ts
+<pre><code class="language-python"># 骨架（Python）                               ←→  src/query.ts（TypeScript）
 
-messages = [...]            # 1.1 状态载体              query.ts:205
-turn_count = 1             # 1.5 turnCount 从 1 起      query.ts:276
+messages = [{"role": "user", ...}]  # ① 状态     State.messages     query.ts:205
+                                    #              turnCount 从 1 起  query.ts:276
+while True:                         # ②  循环     while(true)        query.ts:307
+    resp = client.messages.create() # ③  调模型                      query.ts:659
+    for event in resp: ...          # ③  流式解析                    query.ts:558
+    for b in blocks:
+        if b.type == "tool_use":
+            tool_uses.append(b)     # ③  亲眼见到才算  needsFollowUp  query.ts:834
 
-while True:                # 1.2 ReAct 主循环          query.ts:307
-    response = call_model(messages)          # 调模型     query.ts:659
-    needs_follow_up = any tool_use in blocks # 1.2/1.3   query.ts:558/834
-
-    if not needs_follow_up:                  # 1.2 唯一正常出口
-        return Result("completed")           #           query.ts:1357
-
-    tool_results = run_tools(tool_use_blocks)# 1.4 执行工具 query.ts:1382
-    messages += [assistant_msg, tool_results]# 1.1 三段拼接 query.ts:1716
-
-    turn_count += 1                          # 1.5 熔断检查
-    if max_turns and turn_count > max_turns:
-        return Result("max_turns")           #           query.ts:1705</code></pre>
+    if not tool_uses:               # ② 唯一正常出口  completed       query.ts:1357
+        return ...
+    results = [run_tool(...)]       # ④  执行工具                     query.ts:1382
+    messages += [assistant, results]# ①  三段拼接                     query.ts:1716
+    turn += 1
+    if turn >= max_turns:           # ⑤  熔断        max_turns       query.ts:1705
+        return "[达到上限]"</code></pre>
 
 <div class="page-nav">
   <button class="page-nav-btn" onclick="showPage('cover')">
@@ -2155,6 +2295,7 @@ while True:                # 1.2 ReAct 主循环          query.ts:307
       chapterEl.classList.add('active');
       revealContent(chapterEl);
       initFigures(chapterEl);
+      initCopyButtons(chapterEl);
     }
 
     loadGiscus(id);
@@ -2215,6 +2356,27 @@ while True:                # 1.2 ReAct 主循环          query.ts:307
     document.getElementById('diagram-lightbox').classList.add('open');
     document.body.style.overflow = 'hidden';
   }
+
+  // ── 代码块复制按钮 ──
+  function initCopyButtons(container) {
+    (container || document).querySelectorAll('pre').forEach(pre => {
+      if (pre.querySelector('.copy-btn')) return;
+      const btn = document.createElement('button');
+      btn.className = 'copy-btn';
+      btn.textContent = '复制';
+      btn.onclick = function() {
+        const code = pre.querySelector('code');
+        navigator.clipboard.writeText(code ? code.textContent : pre.textContent).then(() => {
+          btn.textContent = '已复制 ✓';
+          btn.classList.add('copied');
+          setTimeout(() => { btn.textContent = '复制'; btn.classList.remove('copied'); }, 1800);
+        });
+      };
+      pre.appendChild(btn);
+    });
+  }
+  // 封面代码块（如有）
+  initCopyButtons(document);
 
   // ── 第一章：交互式 ReAct 循环播放器 ──
   window.CH1_STEPS = [

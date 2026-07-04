@@ -1,16 +1,57 @@
 <div class="chapter-eyebrow">第一章</div>
 <h1>Agent Loop（核心循环）</h1>
 
+<h2>引言 · 什么是 Agent，Claude Code 为什么需要它</h2>
+
+<p>在进入源码之前，需要先在同一套术语上达成一致——本书后续七章的讨论都建立在这一节的定义之上。</p>
+
+<div class="concept">
+  <div class="concept-label">概念 · Agent（智能体）</div>
+  <p><span class="term">Agent</span> 在人工智能领域有明确的经典定义（Russell &amp; Norvig，《人工智能：一种现代方法》）：能够通过传感器感知环境、并通过执行器作用于环境以实现既定目标的系统。移植到大语言模型场景，这个定义可以具体化为：<strong>一个以 LLM 为决策核心，按"感知 → 决策 → 行动"循环自主完成多步任务，并能依据行动的真实反馈动态调整后续步骤的系统。</strong></p>
+  <p>这个定义包含三个必要条件，任一条件不满足都不构成 Agent：<strong>多步</strong>（而非一问一答）、<strong>自主决策</strong>（而非固定脚本）、<strong>能感知行动反馈</strong>（而非盲目执行预设步骤）。</p>
+</div>
+
+<p>这三个条件划出了 Agent 与另外两类系统的边界：</p>
+
+<table>
+  <thead><tr><th>系统类型</th><th>交互结构</th><th>能否感知环境反馈</th><th>能否自主多步决策</th></tr></thead>
+  <tbody>
+    <tr><td>传统程序</td><td>预定义的确定性指令序列</td><td>否 —— 没有"环境"概念，只有内部状态转移</td><td>否</td></tr>
+    <tr><td>Chatbot / 单次 LLM 调用</td><td>一次 request，一次 response</td><td>否 —— 生成结束即终止，无后续观察</td><td>否</td></tr>
+    <tr><td><strong>Agent</strong></td><td>感知 → 决策 → 行动 → 观察，循环往复</td><td><strong>是</strong> —— 工具执行结果被重新注入决策过程</td><td><strong>是</strong> —— 由模型自主判断何时继续、何时终止</td></tr>
+  </tbody>
+</table>
+
+<p>Claude Code 要解决的核心工程问题，正是让表格最后一行成立：把一次性的 LLM 调用，改造成一个能自主运行多步、且行为会被真实反馈持续修正的系统。1.2 节会看到，"感知 → 决策 → 行动"这个循环在学术上有一个更精确的名字——ReAct。</p>
+
+<h2>Claude Code 的分层设计：从内核到外围</h2>
+
+<p>Claude Code 不是一次性设计出的整体系统，而是围绕一个不可再分的内核——本章要讲的 Agent Loop——逐层向外扩展而成。每一层不替代内层，只为内层提供更强的能力，或更安全的边界：</p>
+
+<table>
+  <thead><tr><th>层级</th><th>名称</th><th>职责</th><th>对应章节</th></tr></thead>
+  <tbody>
+    <tr><td><code>L0</code></td><td>模型 / LLM</td><td>无状态的推理引擎——接收消息数组，输出下一步的文本或工具调用</td><td>—</td></tr>
+    <tr><td><code>L1</code></td><td>Agent Loop（ReAct 循环）</td><td>赋予 L0 多轮"感知 → 决策 → 行动"的能力</td><td><strong>第一章（本章）</strong></td></tr>
+    <tr><td>—</td><td>Tool 接口 · Skills · MCP</td><td>扩大 L1"行动"的边界：Tool 定义模型能调用什么；Skills 把常见任务打包成可复用的提示 + 工具组合；MCP 统一接入任意外部工具与数据源</td><td>第三章</td></tr>
+    <tr><td><code>L2</code></td><td>Harness 运行时</td><td>包裹 Loop 的执行引擎：组装 Prompt、控制 Token 预算、压缩上下文，让循环能长时间稳定运行</td><td>第二章</td></tr>
+    <tr><td><code>L3</code></td><td>多 Agent 编排</td><td>本质是 L2 递归调用自身——每个子 Agent 是一次独立的 L1+L2 实例，而非新增的调度层</td><td>第四、五、六章</td></tr>
+    <tr><td>横切</td><td>权限与安全 · Session 持久化</td><td>贯穿 L0–L3 的全部层级，不属于任何单一层</td><td>第七、八章</td></tr>
+  </tbody>
+</table>
+
+<p>本章对应上表中的 <code>L1</code>。从这里讲起不是任意的行文选择，而是由这套架构本身的依赖方向决定的：<strong>L2 的全部复杂性（Prompt 组装、Token 预算、上下文压缩、各类错误恢复）都是为了让 L1 这个循环能长时间、稳定地存活；L3 的多 Agent 编排，本质上只是让多个 L1+L2 实例并发运行。</strong>L1 是这套架构里唯一"被所有外层依赖、自身却不依赖任何外层"的原语——不先建立对它的准确理解，后续每一章要解决的问题都失去了对照的基准。</p>
+
 <div class="goal-card">
   <div class="goal-card-label">本章目标</div>
   <p>把一句"用户请求"变成"能自己调工具、自己判断何时收工、最后给出结论"的 Agent。读完这章，你会掌握所有 Agent 系统最底层、也最不可省略的那个结构——<strong>循环</strong>，并能对照 Claude Code 真实源码写出一个可运行的单 Agent。</p>
 </div>
 
-<p>在拆源码之前，先建立一个贯穿全书的心智模型。很多人以为 Agent 是某种神秘的"会自己思考的程序"，但当你看进 Claude Code 的核心，会发现它朴素得惊人：</p>
+<p>结合上文的分层定义，本章的核心内容可以先给出一个精确表述，作为贯穿全书的形式化心智模型：</p>
 
 <div class="insight">
-  <div class="insight-label">核心心智模型</div>
-  <p>一个 <strong>Agent 就是「一个 while 循环 + 一个消息数组」</strong>。循环每转一圈，就问一次模型"下一步做什么"；模型要么调用工具（循环继续），要么给出答案（循环结束）。所谓"智能"，是模型贡献的；Claude Code 这套工程代码的职责，只是<strong>把这个循环安全、可靠、可中断地转起来</strong>。</p>
+  <div class="insight-label">形式化定义 · Agent Loop（L1）的最小实现</div>
+  <p>一个 <strong>Agent Loop 就是「一个 while 循环 + 一个只增不减的消息数组」</strong>。循环每迭代一次，即完成一次决策：调用模型判断下一步——发起工具调用（Action，循环继续），或产出最终响应（循环终止）。决策能力完全由模型提供；Claude Code 这层工程代码的职责，仅限于<strong>让该循环安全、可恢复、可中断地运行</strong>。</p>
 </div>
 
 <p>下面这张图就是这句话的动画版——<strong>点「下一步」</strong>，跟着走完一个完整的两轮对话，看左边的控制流怎么循环、右边的 <code>messages[]</code> 怎么逐轮长大。本章接下来的每一节，都是在拆解这张图里的某一步。</p>

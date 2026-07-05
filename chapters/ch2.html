@@ -1,7 +1,7 @@
 <div class="chapter-eyebrow">第二章</div>
-<h1>Harness 运行时</h1>
+<h1>Harness 运行时架构设计</h1>
 <p class="chapter-subtitle">
-  实现目标：驱动 Agent Loop 的外层引擎——一次完整 turn 里，Harness 负责组装 Prompt、管理 Token 预算、预取记忆、压缩上下文，并在 Loop 结束后决定是否继续。
+  驱动 Agent Loop 的外层引擎——一次完整 turn 里，Harness 负责组装 Prompt、管理 Token 预算、预取记忆、压缩上下文，并在 Loop 结束后决定是否继续。
 </p>
 
 <h2>2.1 queryLoop 的职责边界</h2>

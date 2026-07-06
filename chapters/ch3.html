@@ -4,26 +4,29 @@
   实现目标：Agent 能调 Bash、读写文件等多种工具，且读操作并发、写操作串行，互不干扰。
 </p>
 
-<h2>引言 · 为什么工具系统需要专门一章来讲</h2>
+<h2>引言 · 一个矛盾</h2>
 
-<p>第一章讲 Agent Loop 时，工具调用被压缩成一行话："执行工具、拿到结果"。但这句话背后藏着这套架构里最复杂的工程决策之一。</p>
+<p>模型在同一轮里发出三个工具调用——<code>Read("src/query.ts")</code>、<code>Grep("isConcurrencySafe")</code>、<code>Edit("src/Tool.ts", ...)</code>。全部串行执行，慢；全部并发执行，两个读操作没问题，但 Edit 与任何同时进行的写操作相撞，结果就是损坏的文件。这就是工具系统的核心矛盾：<strong>最大化并发（速度）× 保证写操作互斥（正确）</strong>。</p>
 
-<p>考虑这样一个场景：模型在同一轮里同时发出三个工具调用——<code>Read("src/query.ts")</code>、<code>Grep("isConcurrencySafe")</code>、<code>Edit("src/Tool.ts", ...)</code>。如果三个调用串行执行，慢；如果三个调用全部并发，Read 和 Grep 没问题，但 Edit 修改文件时，如果同时有另一个工具也在写同一个文件，结果就是损坏的文件。</p>
-
-<p>这就是工具系统必须解决的核心矛盾：<strong>最大化并发（速度）× 保证写操作的互斥（正确）</strong>。</p>
-
-<p>Claude Code 的解决方案不是一把大锁，而是通过工具接口上的两个谓词——<code>isConcurrencySafe</code> 和 <code>isReadOnly</code>——让每个工具在定义阶段就声明自己的调度属性，调度器据此在运行时把一组工具调用<strong>分批（partition）</strong>：连续的只读工具合并成一个并发批次，每个写工具单独占一个串行批次。读并发、写独占，两者不需要手动协调。</p>
+<p>Claude Code 的解法不是一把大锁，也不是让工具各自管理锁，而是把决策拆成两半：<strong>工具只声明属性，调度器只执行策略</strong>。每个工具通过 <code>isConcurrencySafe</code> 谓词在定义阶段声明"我能不能与别人并发"，调度器据此在运行时把一组调用<strong>分批（partition）</strong>——连续的只读工具合并成并发批次，每个写工具独占一个串行批次。两者互不知晓对方的存在，却共同构成正确的执行计划。</p>
 
 <div class="goal-card">
   <div class="goal-card-label">本章目标</div>
-  <p>读完这章，你会理解：Tool 接口是什么、<code>buildTool</code> 为什么是必要的工厂抽象、调度器怎么用 <code>partitionToolCalls</code> 实现"批内并发、批间串行"、MCP 外部工具怎么适配进这套接口，以及 ToolSearch 如何解决"工具太多、首屏太慢"的加载问题。</p>
+  <p>读完这章，你会理解：Tool 接口为什么要同时服务四个受众（3.1）、<code>buildTool</code> 的 fail-closed 默认值（3.2）、<code>partitionToolCalls</code> 如何实现"批内并发、批间串行"（3.3）、MCP 外部工具如何无缝融入同一套调度（3.4），以及 ToolSearch 怎么把工具数量对首屏成本的影响从线性降到常数（3.5）。</p>
 </div>
 
-<p>本章的分析路径：先从接口定义（3.1）入手，理解一个 Tool 必须承诺什么；再看工具注册表（3.2），理解运行时是如何把所有工具组装在一起的；然后是调度器（3.3），这是本章最关键的工程核心；最后是 MCP 接入（3.4）和 ToolSearch 懒加载（3.5）两个拓展机制。</p>
+<h2 id="s3-1">3.1 Tool 接口——一个契约，四个受众</h2>
 
-<h2 id="s3-1">3.1 Tool 接口——每把手的完整契约</h2>
+<p>在 Claude Code 里，一个"工具"不是一个函数，而是一个<strong>实现了 <code>Tool&lt;Input, Output, P&gt;</code> 接口的对象</strong>（<code>Tool.ts:281</code>）。这个接口有 40+ 个成员，乍看臃肿——但它并不是设计失控，而是因为一个工具要同时对<strong>四个完全不同的消费者</strong>作出承诺：</p>
 
-<p>在 Claude Code 里，一个"工具"不是一个函数，而是一个<strong>实现了 <code>Tool&lt;Input, Output, P&gt;</code> 接口的对象</strong>（<code>Tool.ts:281</code>）。这个接口足足有 40+ 个成员——乍看吓人，但如果按职责归类，每个字段就各就其位了：</p>
+<ul>
+  <li><strong>对模型</strong>：<code>inputSchema</code>、<code>description()</code>、<code>prompt()</code>——"我是谁、怎么调用我"；</li>
+  <li><strong>对调度器</strong>：<code>isConcurrencySafe()</code>、<code>isReadOnly()</code>——"我能不能与别人并发"；</li>
+  <li><strong>对权限系统</strong>：<code>validateInput()</code>、<code>checkPermissions()</code>、<code>isDestructive()</code>——"执行我之前要过哪些关"；</li>
+  <li><strong>对 UI</strong>：<code>renderToolUseMessage()</code> 等——"我在终端里长什么样"。</li>
+</ul>
+
+<p>四个受众各取所需，互不越界：调度器从不读 schema，模型从不见 render 函数。按这个视角看接口分域：</p>
 
 <div class="figure">
   <div class="figure-head">
@@ -100,7 +103,7 @@
   <div class="figure-cap">Tool 接口的 40+ 个成员可归入六域：身份、模式约定、执行、调度属性、权限、渲染。其中"调度属性"和"权限"是 Claude Code 架构最独特的两处设计。</div>
 </div>
 
-<p>对照这张图，先抓最关键的几个成员：</p>
+<p>抓住本章要用到的核心成员：</p>
 
 <pre><code class="language-typescript">// Tool.ts:281 — 精简版，只保留本章必须理解的字段
 type Tool&lt;Input, Output, P&gt; = {
@@ -131,11 +134,11 @@ type Tool&lt;Input, Output, P&gt; = {
   ): ToolResultBlockParam
 }</code></pre>
 
-<p>两个地方值得在这里多解释：</p>
+<p>两个成员值得多说一句：</p>
 
-<p><strong><code>inputSchema</code> 的双重用途。</strong> Zod schema 不只是运行时校验，它还是文档。Claude Code 在组装 System Prompt 时，会把每个工具的 <code>inputSchema</code> 自动序列化成 JSON Schema 格式，作为"这个工具怎么用、有哪些参数"的说明发给模型。这意味着：你定义 schema 的用词和结构，直接影响模型会不会正确调用这个工具。字段名取对了、描述写清楚了，就是在给模型写说明书。</p>
+<p><strong><code>inputSchema</code> 是校验器，更是说明书。</strong> Zod schema 会被自动序列化成 JSON Schema 发给模型，作为"这个工具有哪些参数、怎么用"的文档。这意味着 schema 的字段名和描述文案直接决定模型会不会正确调用——写 schema 就是在给模型写 API 文档。这也解释了为什么 Claude Code 的工具描述都长得像教程而不像类型定义。</p>
 
-<p><strong><code>maxResultSizeChars</code> 的设计意图。</strong> 工具结果可能很大——一个 <code>Bash("find . -name '*.ts'")</code> 可能返回几十 KB 的路径列表。把这么大的结果直接塞进消息数组，一轮就能把 token 耗尽。<code>maxResultSizeChars</code> 设了一道闸：结果超限时，内容落盘存文件，消息里只剩路径 + 前几行预览（<code>toolResultStorage.ts</code>）。注意 <code>FileReadTool</code> 把这个值设为 <code>Infinity</code>（<code>FileReadTool.ts:342</code>）——原因是 FileRead 的输出本身就是文件内容，再存一份等于创造循环依赖（存进去的路径被模型再 Read，又存进去……）。</p>
+<p><strong><code>maxResultSizeChars</code> 是 token 的闸门。</strong> 一个 <code>Bash("find . -name '*.ts'")</code> 可能返回几十 KB。结果超限时内容落盘，消息里只留路径 + 预览（<code>toolResultStorage.ts</code>）。有一个例外暴露了设计者的思考深度：<code>FileReadTool</code> 把它设为 <code>Infinity</code>（<code>FileReadTool.ts:342</code>）——FileRead 的输出本身就是文件内容，再落盘等于制造循环（存下的路径被模型再 Read，又落盘……）。</p>
 
 <h3>3.1.1 权限流水线：validateInput → checkPermissions → call</h3>
 
@@ -160,11 +163,13 @@ async function checkPermissionsAndCallTool(tool, input, ctx, ...) {
   return [resultMessage(result)]
 }</code></pre>
 
-<p><code>validateInput</code> 负责语义层面的前置检查——例如"文件路径不能是绝对路径"、"Bash 命令不能包含危险的 <code>rm -rf /</code>"这类业务规则，它与权限无关，失败直接返回错误不弹权限框。<code>checkPermissions</code> 则是工具级别的自定义权限逻辑（全局权限框架在第七章），例如 MCP 工具在这里统一返回 <code>passthrough</code> 让上层权限系统接管。</p>
+<p><code>validateInput</code> 负责语义层面的前置检查——"路径必须是绝对路径"这类业务规则，与权限无关，失败直接返回错误、不弹权限框。<code>checkPermissions</code> 则是工具级的自定义权限逻辑（全局权限框架在第七章），例如 MCP 工具在这里统一返回 <code>passthrough</code>，让上层权限系统接管。</p>
+
+<p>还有一条贯穿整条流水线的铁律：<strong>错误不逃逸</strong>。参数校验失败、权限被拒、<code>call()</code> 执行中抛异常——所有失败路径都不会向上抛，而是被包装成 <code>is_error: true</code> 的 tool_result 送回消息数组。对循环来说，错误只是另一种观察结果：模型看到"Edit 失败：old_string 不唯一"，下一轮自己修正参数重试。工具系统靠这条规则获得了自愈能力——任何单次工具失败都不足以杀死 Agent Loop。</p>
 
 <div class="insight">
   <div class="insight-label">设计启示</div>
-  <p><span class="role">给开发者</span>把"参数对不对"（validateInput）和"能不能做"（checkPermissions）分成两个关卡，是个很值得学习的分层习惯。前者是无副作用的纯校验，可以在任何时机调用；后者涉及用户交互和上下文状态，调用有代价。把两者混在一起会导致"弹了权限框才发现参数本来就错了"的体验问题。</p>
+  <p><span class="role">给开发者</span>把"参数对不对"（validateInput）和"能不能做"（checkPermissions）拆成两关：前者是无副作用的纯校验，随时可调；后者涉及用户交互，调用有代价。混在一起就会出现"弹了权限框才发现参数本来就错了"的体验问题。而"错误不逃逸"是所有 Agent 系统的必选项——异常必须转换成模型可读的数据，否则模型永远没有机会自我修正。</p>
 </div>
 
 <h2 id="s3-2">3.2 buildTool——消灭样板的工厂</h2>
@@ -256,7 +261,7 @@ function partitionToolCalls(
   }, [])
 }</code></pre>
 
-<p>这个算法最重要的特性：<strong>它保持顺序，不做全局重排。</strong>如果模型发出了 [Read, Read, Edit, Read]，分批结果是 [{Read, Read}, {Edit}, {Read}]，而不是 [{Read, Read, Read}, {Edit}]。为什么不做全局优化？因为模型发出工具调用的顺序本身可能有语义——Edit 之前的两次 Read 是为了读取它要修改的内容，Edit 之后的 Read 是验证修改结果。打乱顺序会破坏这个语义。</p>
+<p>这个算法最重要的特性：<strong>它保持顺序，不做全局重排。</strong>如果模型发出 [Read, Read, Edit, Read]，分批结果是 [{Read, Read}, {Edit}, {Read}]，而不是"优化"成 [{Read, Read, Read}, {Edit}]。一个更聪明的调度器完全可以做依赖分析、构建 DAG、全局重排——但 Claude Code 拒绝了这条路，因为它建立在一个错误的前提上：调度器比模型更懂执行顺序。事实相反，<strong>模型才是规划者</strong>。Edit 之前的 Read 是在读取将要修改的内容，Edit 之后的 Read 是在验证修改结果——这个顺序本身就是模型规划的一部分，调度器读不懂它，也不应该猜。保序贪心是"调度器只做自己确定的优化"这一克制原则的直接产物：相邻只读操作交换顺序一定无害（这是 <code>isReadOnly</code> 从语义上保证的），除此之外一律不动。</p>
 
 <div class="figure">
   <div class="figure-head">
@@ -468,18 +473,17 @@ export async function* all&lt;A&gt;(
 
 <div class="insight">
   <div class="insight-label">设计启示</div>
-  <p><span class="role">给开发者</span>这套调度设计的精髓是"声明式并发"：工具不参与调度决策，只声明自己的属性（<code>isConcurrencySafe</code>），调度器根据这个声明自动生成最优执行计划。这比在工具内部手动控制锁和同步要安全得多——工具作者只需要诚实地声明，就能自动获得正确的并发行为。</p>
-  <p><span class="role">给产品经理</span>这套机制是"快而不乱"的技术基础。每轮工具调用里，Agent 能同时读多个文件、搜多个模式，但写操作始终有序进行，不会出现文件被交叉写坏的情况。这也解释了为什么 Claude Code 处理大型代码库时速度相对快——读操作是真的并发的。</p>
+  <p><span class="role">给开发者</span>这套调度的精髓是"声明式并发"：工具不参与调度决策，只声明属性；调度器不理解工具语义，只执行策略。工具作者只要诚实声明，就自动获得正确的并发行为——比在每个工具内部手写锁安全得多。值得注意的是，下一章的主角 <code>Agent</code> 工具也声明了 <code>isConcurrencySafe() → true</code>：正因如此，模型一轮发出的多个 SubAgent 才能落进同一个并发批次、真正并行派生。</p>
+  <p><span class="role">给产品经理</span>这套机制是"快而不乱"的技术基础：Agent 能同时读多个文件、搜多个模式，写操作却始终有序。Claude Code 处理大型代码库快，读操作真并发是主要原因之一。</p>
 </div>
 
 <h2 id="s3-4">3.4 MCP 工具统一接入</h2>
 
-<p>到目前为止我们讨论的都是"内置工具"——Bash、Read、Edit 这类随 Claude Code 发布的工具。但 Claude Code 还支持一类"外部工具"：通过 <strong>MCP（Model Context Protocol）</strong> 协议接入的第三方工具，比如数据库查询工具、Figma 设计工具、Slack 消息工具等。这些工具的代码不在 Claude Code 里，而是运行在外部进程中。</p>
+<p>前三节讨论的都是内置工具。Claude Code 还支持通过 <strong>MCP（Model Context Protocol）</strong>接入的第三方工具——数据库查询、Figma、Slack 等——它们的代码运行在外部进程里。工具系统面临的问题是：外部工具如何享受与内置工具完全一致的调度、权限和结果处理？</p>
 
 <div class="concept">
   <div class="concept-label">概念 · MCP（Model Context Protocol）</div>
-  <p><span class="term">MCP（Model Context Protocol）</span>是 Anthropic 提出的开放协议，定义了 LLM 应用与外部工具 / 数据源之间的标准通信接口。MCP 服务端（Server）是一个独立进程，暴露工具定义和调用接口；MCP 客户端（Client）是嵌入在 LLM 应用里的连接器，负责发现工具、传递调用请求、接收结果。</p>
-  <p>MCP 的核心价值是<strong>标准化</strong>：任何人都可以按照协议实现一个 MCP Server，让任何支持 MCP 的 AI 应用立刻获得这个工具的能力，无需修改 AI 应用本身的代码。</p>
+  <p><span class="term">MCP</span> 是 Anthropic 提出的开放协议，定义 LLM 应用与外部工具/数据源之间的标准接口：Server 是独立进程，暴露工具定义与调用端点；Client 嵌在 LLM 应用里，负责发现工具、转发调用。核心价值是标准化——任何人实现一个 MCP Server，所有支持 MCP 的 AI 应用立刻获得该能力。</p>
 </div>
 
 <p>MCP 工具在 Claude Code 内部的接入点是 <code>services/mcp/client.ts</code>。当一个 MCP Server 连接后，Claude Code 遍历它暴露的所有工具定义，把每个工具"改造"成一个符合 <code>Tool</code> 接口的本地对象（<code>client.ts:1768</code>）：</p>
@@ -522,7 +526,7 @@ for (const tool of mcpTools) {
   tools.push(mcpTool)
 }</code></pre>
 
-<p>关键在第①步：MCP 工具通过 <code>annotations</code>（工具元数据）声明自己的属性，Claude Code 把这些声明<strong>自动翻译成本地调度属性</strong>。一个数据库查询工具在 MCP 定义里标注了 <code>readOnlyHint: true</code>，Claude Code 就自动把它放进并发批次；一个会写文件的工具标注了 <code>destructiveHint: true</code>，就串行执行并在权限层弹出额外警告。外部工具无缝融入了内置工具的调度体系，无需特殊处理。</p>
+<p>关键在第①步：MCP 协议的 <code>annotations</code> 元数据被<strong>自动翻译成本地调度属性</strong>。数据库查询工具标注 <code>readOnlyHint: true</code>，就自动进入并发批次；标注 <code>destructiveHint: true</code> 的工具串行执行并在权限层触发额外警告。注意 <code>?? false</code> 的写法——3.2 节的 fail-closed 原则延伸到了信任边界之外：annotations 是外部 Server 自报的，<strong>没声明的一律按最坏情况（写操作）处理</strong>。适配完成后，调度器完全看不出一个工具是内置的还是外部的。</p>
 
 <div class="figure">
   <div class="figure-head">
@@ -589,14 +593,11 @@ for (const tool of mcpTools) {
 
 <h2 id="s3-5">3.5 ToolSearch——工具的懒加载</h2>
 
-<p>随着 MCP 生态的发展，一个重型 Claude Code 实例可能挂载几十个 MCP Server，每个 Server 暴露数十个工具。把所有工具的完整 Schema 全部写进 System Prompt，一个 Prompt 就要消耗数万 token——既慢又贵，而且大多数工具在当次任务里根本用不到。</p>
-
-<p>这是一个经典的"按需加载"问题，Claude Code 的解法叫 <strong>ToolSearch</strong>。</p>
+<p>MCP 解决了"接入"，却制造了新问题：一个重型实例可能挂载几十个 Server、数百个工具，把所有 Schema 全部写进 System Prompt 要消耗数万 token——既慢又贵，而且大多数工具当次任务根本用不到。Claude Code 的解法叫 <strong>ToolSearch</strong>。</p>
 
 <div class="concept">
   <div class="concept-label">概念 · ToolSearch（工具懒加载）</div>
-  <p>ToolSearch 是一种<span class="term">延迟加载（lazy loading）</span>机制：默认只在 System Prompt 里列出工具的名字（"告知存在"），不发完整 Schema；模型通过调用 <code>ToolSearch</code> 工具，用关键词查询、加载某个工具的完整 Schema，然后才能调用它。</p>
-  <p>这与浏览器里的代码分割（code splitting）思路完全相同：先加载框架和首屏代码，剩余功能等到真正需要时才动态拉取。</p>
+  <p>ToolSearch 把"声明存在"和"提供完整用法"拆成两个阶段：System Prompt 里默认只列延迟工具的<strong>名字</strong>；模型需要时先调 <code>ToolSearch</code> 拉取完整 Schema，再发起真正的调用。与浏览器的代码分割（code splitting）思路相同——先加载首屏，其余按需拉取。</p>
 </div>
 
 <p>一个工具是否"被延迟加载"由两个条件决定（<code>toolSearch.ts:isDeferredTool</code>）：</p>
@@ -612,43 +613,23 @@ export function isDeferredTool(tool: Tool): boolean {
   return tool.shouldDefer === true              // 内置工具显式标记可延迟
 }</code></pre>
 
-<p>当 ToolSearch 模式开启时，System Prompt 里看起来是这样的：</p>
+<p>两阶段流程在消息层面长这样：</p>
 
-<pre><code class="language-text"># System Prompt（精简示意）
-可用工具（立即可用，完整 schema 已附）：
-  Bash, Read, Edit, Write, Grep, Glob, Agent, ToolSearch ...
+<pre><code class="language-text"># System Prompt：内置工具带完整 schema；延迟工具只有名字
+可用工具： Bash, Read, Edit, Grep, Agent, ToolSearch ...
+&lt;system-reminder&gt; deferred tools（先调 ToolSearch 才能用）：
+  mcp__figma__get_design_context, mcp__slack__send_message, ...
+&lt;/system-reminder&gt;
 
-&lt;system-reminder&gt;
-  deferred tools（需先调 ToolSearch 加载 schema）：
-  mcp__figma__get_design_context
-  mcp__figma__generate_figma_design
-  mcp__linear__authenticate
-  mcp__slack__send_message
-  ... （仅名字，无参数描述）
-&lt;/system-reminder&gt;</code></pre>
+# 第一步：模型拉取 schema
+tool_use:   ToolSearch { query: "select:mcp__figma__get_design_context" }
+tool_result: &lt;functions&gt;{"name": "mcp__figma__get_design_context",
+             "parameters": {...完整 schema...}}&lt;/functions&gt;
 
-<p>当模型想用 Figma 工具时，先调用 ToolSearch：</p>
+# 第二步：该工具从此可以正常调用（schema 已在上下文中，本会话内复用）
+tool_use:   mcp__figma__get_design_context { ... }</code></pre>
 
-<pre><code class="language-json">// 模型发出的工具调用
-{
-  "type": "tool_use",
-  "name": "ToolSearch",
-  "input": {
-    "query": "select:mcp__figma__get_design_context"
-  }
-}
-
-// ToolSearch 返回（函数签名变得可调用）
-{
-  "type": "tool_result",
-  "content": "&lt;functions&gt;
-    &lt;function&gt;{\"name\": \"mcp__figma__get_design_context\",
-               \"description\": \"...\",
-               \"parameters\": {...complete schema...}}&lt;/function&gt;
-  &lt;/functions&gt;"
-}</code></pre>
-
-<p>拿到完整 Schema 后，模型就可以在下一步调用 <code>mcp__figma__get_design_context</code> 了。这个"ToolSearch → 实际工具调用"的两步流程，带来了约 40% 的首屏 token 节省，代价是多一轮往返（当命中缓存时几乎可以忽略，因为结果可以在模型的上下文中重用）。</p>
+<p>代价是多一轮往返，收益是首屏 token 节省约 40%——而且 Schema 一旦进入上下文就可以在整个会话中复用，往返成本只付一次。</p>
 
 <div class="insight">
   <div class="insight-label">设计启示</div>
@@ -700,9 +681,9 @@ yield MessageUpdate → query.ts 收集 toolResults[]
 
 <h2>本章代码</h2>
 
-<p>本章的示例工具在 <code>code/examples/tool_demo.py</code>。它实现了一个迷你版工具系统：Tool 接口定义、<code>buildTool</code> 工厂、<code>partitionToolCalls</code> 分批算法、以及 <code>runTools</code> 调度器——与真实源码结构一一对应，但去掉了 React 渲染和 MCP 连接的部分，专注于本章的核心调度逻辑。</p>
+<p>本章的示例在 <code>code/examples/tool_demo.py</code>。它实现了一个迷你版工具系统：Tool 接口定义、<code>build_tool</code> 工厂（fail-closed 默认值）、<code>partition_tool_calls</code> 保序分批、以及带并发上限的 <code>run_tools</code> 调度器——与真实源码结构一一对应，但去掉了模型调用与渲染部分，纯本地模拟调度，无需 API Key 即可运行。</p>
 
-<pre><code class="language-python"># 运行（需先设置 ANTHROPIC_API_KEY）
+<pre><code class="language-python"># 纯本地运行，无需 API Key
 cd code
 uv run python examples/tool_demo.py</code></pre>
 

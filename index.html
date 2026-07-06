@@ -806,11 +806,12 @@
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showSection('ch3','s3-1')">3.1 Tool 接口与契约</a>
+        <a class="nav-section" onclick="showSection('ch3','s3-1')">3.1 Tool 接口——一个契约四个受众</a>
         <a class="nav-section" onclick="showSection('ch3','s3-2')">3.2 buildTool 工厂</a>
         <a class="nav-section" onclick="showSection('ch3','s3-3')">3.3 读并发与写独占调度</a>
         <a class="nav-section" onclick="showSection('ch3','s3-4')">3.4 MCP 工具统一接入</a>
         <a class="nav-section" onclick="showSection('ch3','s3-5')">3.5 ToolSearch 懒加载</a>
+        <a class="nav-section" onclick="showSection('ch3','s3-6')">3.6 工具执行的完整生命周期</a>
       </div>
     </div>
 
@@ -820,11 +821,11 @@
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showPage('ch4')">4.1 SubAgent 派生原理</a>
-        <a class="nav-section" onclick="showPage('ch4')">4.2 上下文隔离机制</a>
-        <a class="nav-section" onclick="showPage('ch4')">4.3 同步与异步派发</a>
-        <a class="nav-section" onclick="showPage('ch4')">4.4 SubAgent 拆分约束</a>
-        <a class="nav-section" onclick="showPage('ch4')">4.5 Worktree 文件系统隔离</a>
+        <a class="nav-section" onclick="showSection('ch4','s4-1')">4.1 派生原理——AgentTool 只是普通工具</a>
+        <a class="nav-section" onclick="showSection('ch4','s4-2')">4.2 上下文隔离机制</a>
+        <a class="nav-section" onclick="showSection('ch4','s4-3')">4.3 同步与异步派发</a>
+        <a class="nav-section" onclick="showSection('ch4','s4-4')">4.4 SubAgent 拆分约束</a>
+        <a class="nav-section" onclick="showSection('ch4','s4-5')">4.5 Worktree 文件系统隔离</a>
       </div>
     </div>
 
@@ -2734,26 +2735,29 @@ return { reason: 'prompt_too_long' }</code></pre>
   实现目标：Agent 能调 Bash、读写文件等多种工具，且读操作并发、写操作串行，互不干扰。
 </p>
 
-<h2>引言 · 为什么工具系统需要专门一章来讲</h2>
+<h2>引言 · 一个矛盾</h2>
 
-<p>第一章讲 Agent Loop 时，工具调用被压缩成一行话："执行工具、拿到结果"。但这句话背后藏着这套架构里最复杂的工程决策之一。</p>
+<p>模型在同一轮里发出三个工具调用——<code>Read("src/query.ts")</code>、<code>Grep("isConcurrencySafe")</code>、<code>Edit("src/Tool.ts", ...)</code>。全部串行执行，慢；全部并发执行，两个读操作没问题，但 Edit 与任何同时进行的写操作相撞，结果就是损坏的文件。这就是工具系统的核心矛盾：<strong>最大化并发（速度）× 保证写操作互斥（正确）</strong>。</p>
 
-<p>考虑这样一个场景：模型在同一轮里同时发出三个工具调用——<code>Read("src/query.ts")</code>、<code>Grep("isConcurrencySafe")</code>、<code>Edit("src/Tool.ts", ...)</code>。如果三个调用串行执行，慢；如果三个调用全部并发，Read 和 Grep 没问题，但 Edit 修改文件时，如果同时有另一个工具也在写同一个文件，结果就是损坏的文件。</p>
-
-<p>这就是工具系统必须解决的核心矛盾：<strong>最大化并发（速度）× 保证写操作的互斥（正确）</strong>。</p>
-
-<p>Claude Code 的解决方案不是一把大锁，而是通过工具接口上的两个谓词——<code>isConcurrencySafe</code> 和 <code>isReadOnly</code>——让每个工具在定义阶段就声明自己的调度属性，调度器据此在运行时把一组工具调用<strong>分批（partition）</strong>：连续的只读工具合并成一个并发批次，每个写工具单独占一个串行批次。读并发、写独占，两者不需要手动协调。</p>
+<p>Claude Code 的解法不是一把大锁，也不是让工具各自管理锁，而是把决策拆成两半：<strong>工具只声明属性，调度器只执行策略</strong>。每个工具通过 <code>isConcurrencySafe</code> 谓词在定义阶段声明"我能不能与别人并发"，调度器据此在运行时把一组调用<strong>分批（partition）</strong>——连续的只读工具合并成并发批次，每个写工具独占一个串行批次。两者互不知晓对方的存在，却共同构成正确的执行计划。</p>
 
 <div class="goal-card">
   <div class="goal-card-label">本章目标</div>
-  <p>读完这章，你会理解：Tool 接口是什么、<code>buildTool</code> 为什么是必要的工厂抽象、调度器怎么用 <code>partitionToolCalls</code> 实现"批内并发、批间串行"、MCP 外部工具怎么适配进这套接口，以及 ToolSearch 如何解决"工具太多、首屏太慢"的加载问题。</p>
+  <p>读完这章，你会理解：Tool 接口为什么要同时服务四个受众（3.1）、<code>buildTool</code> 的 fail-closed 默认值（3.2）、<code>partitionToolCalls</code> 如何实现"批内并发、批间串行"（3.3）、MCP 外部工具如何无缝融入同一套调度（3.4），以及 ToolSearch 怎么把工具数量对首屏成本的影响从线性降到常数（3.5）。</p>
 </div>
 
-<p>本章的分析路径：先从接口定义（3.1）入手，理解一个 Tool 必须承诺什么；再看工具注册表（3.2），理解运行时是如何把所有工具组装在一起的；然后是调度器（3.3），这是本章最关键的工程核心；最后是 MCP 接入（3.4）和 ToolSearch 懒加载（3.5）两个拓展机制。</p>
+<h2 id="s3-1">3.1 Tool 接口——一个契约，四个受众</h2>
 
-<h2 id="s3-1">3.1 Tool 接口——每把手的完整契约</h2>
+<p>在 Claude Code 里，一个"工具"不是一个函数，而是一个<strong>实现了 <code>Tool&lt;Input, Output, P&gt;</code> 接口的对象</strong>（<code>Tool.ts:281</code>）。这个接口有 40+ 个成员，乍看臃肿——但它并不是设计失控，而是因为一个工具要同时对<strong>四个完全不同的消费者</strong>作出承诺：</p>
 
-<p>在 Claude Code 里，一个"工具"不是一个函数，而是一个<strong>实现了 <code>Tool&lt;Input, Output, P&gt;</code> 接口的对象</strong>（<code>Tool.ts:281</code>）。这个接口足足有 40+ 个成员——乍看吓人，但如果按职责归类，每个字段就各就其位了：</p>
+<ul>
+  <li><strong>对模型</strong>：<code>inputSchema</code>、<code>description()</code>、<code>prompt()</code>——"我是谁、怎么调用我"；</li>
+  <li><strong>对调度器</strong>：<code>isConcurrencySafe()</code>、<code>isReadOnly()</code>——"我能不能与别人并发"；</li>
+  <li><strong>对权限系统</strong>：<code>validateInput()</code>、<code>checkPermissions()</code>、<code>isDestructive()</code>——"执行我之前要过哪些关"；</li>
+  <li><strong>对 UI</strong>：<code>renderToolUseMessage()</code> 等——"我在终端里长什么样"。</li>
+</ul>
+
+<p>四个受众各取所需，互不越界：调度器从不读 schema，模型从不见 render 函数。按这个视角看接口分域：</p>
 
 <div class="figure">
   <div class="figure-head">
@@ -2830,7 +2834,7 @@ return { reason: 'prompt_too_long' }</code></pre>
   <div class="figure-cap">Tool 接口的 40+ 个成员可归入六域：身份、模式约定、执行、调度属性、权限、渲染。其中"调度属性"和"权限"是 Claude Code 架构最独特的两处设计。</div>
 </div>
 
-<p>对照这张图，先抓最关键的几个成员：</p>
+<p>抓住本章要用到的核心成员：</p>
 
 <pre><code class="language-typescript">// Tool.ts:281 — 精简版，只保留本章必须理解的字段
 type Tool&lt;Input, Output, P&gt; = {
@@ -2861,11 +2865,11 @@ type Tool&lt;Input, Output, P&gt; = {
   ): ToolResultBlockParam
 }</code></pre>
 
-<p>两个地方值得在这里多解释：</p>
+<p>两个成员值得多说一句：</p>
 
-<p><strong><code>inputSchema</code> 的双重用途。</strong> Zod schema 不只是运行时校验，它还是文档。Claude Code 在组装 System Prompt 时，会把每个工具的 <code>inputSchema</code> 自动序列化成 JSON Schema 格式，作为"这个工具怎么用、有哪些参数"的说明发给模型。这意味着：你定义 schema 的用词和结构，直接影响模型会不会正确调用这个工具。字段名取对了、描述写清楚了，就是在给模型写说明书。</p>
+<p><strong><code>inputSchema</code> 是校验器，更是说明书。</strong> Zod schema 会被自动序列化成 JSON Schema 发给模型，作为"这个工具有哪些参数、怎么用"的文档。这意味着 schema 的字段名和描述文案直接决定模型会不会正确调用——写 schema 就是在给模型写 API 文档。这也解释了为什么 Claude Code 的工具描述都长得像教程而不像类型定义。</p>
 
-<p><strong><code>maxResultSizeChars</code> 的设计意图。</strong> 工具结果可能很大——一个 <code>Bash("find . -name '*.ts'")</code> 可能返回几十 KB 的路径列表。把这么大的结果直接塞进消息数组，一轮就能把 token 耗尽。<code>maxResultSizeChars</code> 设了一道闸：结果超限时，内容落盘存文件，消息里只剩路径 + 前几行预览（<code>toolResultStorage.ts</code>）。注意 <code>FileReadTool</code> 把这个值设为 <code>Infinity</code>（<code>FileReadTool.ts:342</code>）——原因是 FileRead 的输出本身就是文件内容，再存一份等于创造循环依赖（存进去的路径被模型再 Read，又存进去……）。</p>
+<p><strong><code>maxResultSizeChars</code> 是 token 的闸门。</strong> 一个 <code>Bash("find . -name '*.ts'")</code> 可能返回几十 KB。结果超限时内容落盘，消息里只留路径 + 预览（<code>toolResultStorage.ts</code>）。有一个例外暴露了设计者的思考深度：<code>FileReadTool</code> 把它设为 <code>Infinity</code>（<code>FileReadTool.ts:342</code>）——FileRead 的输出本身就是文件内容，再落盘等于制造循环（存下的路径被模型再 Read，又落盘……）。</p>
 
 <h3>3.1.1 权限流水线：validateInput → checkPermissions → call</h3>
 
@@ -2890,11 +2894,13 @@ async function checkPermissionsAndCallTool(tool, input, ctx, ...) {
   return [resultMessage(result)]
 }</code></pre>
 
-<p><code>validateInput</code> 负责语义层面的前置检查——例如"文件路径不能是绝对路径"、"Bash 命令不能包含危险的 <code>rm -rf /</code>"这类业务规则，它与权限无关，失败直接返回错误不弹权限框。<code>checkPermissions</code> 则是工具级别的自定义权限逻辑（全局权限框架在第七章），例如 MCP 工具在这里统一返回 <code>passthrough</code> 让上层权限系统接管。</p>
+<p><code>validateInput</code> 负责语义层面的前置检查——"路径必须是绝对路径"这类业务规则，与权限无关，失败直接返回错误、不弹权限框。<code>checkPermissions</code> 则是工具级的自定义权限逻辑（全局权限框架在第七章），例如 MCP 工具在这里统一返回 <code>passthrough</code>，让上层权限系统接管。</p>
+
+<p>还有一条贯穿整条流水线的铁律：<strong>错误不逃逸</strong>。参数校验失败、权限被拒、<code>call()</code> 执行中抛异常——所有失败路径都不会向上抛，而是被包装成 <code>is_error: true</code> 的 tool_result 送回消息数组。对循环来说，错误只是另一种观察结果：模型看到"Edit 失败：old_string 不唯一"，下一轮自己修正参数重试。工具系统靠这条规则获得了自愈能力——任何单次工具失败都不足以杀死 Agent Loop。</p>
 
 <div class="insight">
   <div class="insight-label">设计启示</div>
-  <p><span class="role">给开发者</span>把"参数对不对"（validateInput）和"能不能做"（checkPermissions）分成两个关卡，是个很值得学习的分层习惯。前者是无副作用的纯校验，可以在任何时机调用；后者涉及用户交互和上下文状态，调用有代价。把两者混在一起会导致"弹了权限框才发现参数本来就错了"的体验问题。</p>
+  <p><span class="role">给开发者</span>把"参数对不对"（validateInput）和"能不能做"（checkPermissions）拆成两关：前者是无副作用的纯校验，随时可调；后者涉及用户交互，调用有代价。混在一起就会出现"弹了权限框才发现参数本来就错了"的体验问题。而"错误不逃逸"是所有 Agent 系统的必选项——异常必须转换成模型可读的数据，否则模型永远没有机会自我修正。</p>
 </div>
 
 <h2 id="s3-2">3.2 buildTool——消灭样板的工厂</h2>
@@ -2986,7 +2992,7 @@ function partitionToolCalls(
   }, [])
 }</code></pre>
 
-<p>这个算法最重要的特性：<strong>它保持顺序，不做全局重排。</strong>如果模型发出了 [Read, Read, Edit, Read]，分批结果是 [{Read, Read}, {Edit}, {Read}]，而不是 [{Read, Read, Read}, {Edit}]。为什么不做全局优化？因为模型发出工具调用的顺序本身可能有语义——Edit 之前的两次 Read 是为了读取它要修改的内容，Edit 之后的 Read 是验证修改结果。打乱顺序会破坏这个语义。</p>
+<p>这个算法最重要的特性：<strong>它保持顺序，不做全局重排。</strong>如果模型发出 [Read, Read, Edit, Read]，分批结果是 [{Read, Read}, {Edit}, {Read}]，而不是"优化"成 [{Read, Read, Read}, {Edit}]。一个更聪明的调度器完全可以做依赖分析、构建 DAG、全局重排——但 Claude Code 拒绝了这条路，因为它建立在一个错误的前提上：调度器比模型更懂执行顺序。事实相反，<strong>模型才是规划者</strong>。Edit 之前的 Read 是在读取将要修改的内容，Edit 之后的 Read 是在验证修改结果——这个顺序本身就是模型规划的一部分，调度器读不懂它，也不应该猜。保序贪心是"调度器只做自己确定的优化"这一克制原则的直接产物：相邻只读操作交换顺序一定无害（这是 <code>isReadOnly</code> 从语义上保证的），除此之外一律不动。</p>
 
 <div class="figure">
   <div class="figure-head">
@@ -3198,18 +3204,17 @@ export async function* all&lt;A&gt;(
 
 <div class="insight">
   <div class="insight-label">设计启示</div>
-  <p><span class="role">给开发者</span>这套调度设计的精髓是"声明式并发"：工具不参与调度决策，只声明自己的属性（<code>isConcurrencySafe</code>），调度器根据这个声明自动生成最优执行计划。这比在工具内部手动控制锁和同步要安全得多——工具作者只需要诚实地声明，就能自动获得正确的并发行为。</p>
-  <p><span class="role">给产品经理</span>这套机制是"快而不乱"的技术基础。每轮工具调用里，Agent 能同时读多个文件、搜多个模式，但写操作始终有序进行，不会出现文件被交叉写坏的情况。这也解释了为什么 Claude Code 处理大型代码库时速度相对快——读操作是真的并发的。</p>
+  <p><span class="role">给开发者</span>这套调度的精髓是"声明式并发"：工具不参与调度决策，只声明属性；调度器不理解工具语义，只执行策略。工具作者只要诚实声明，就自动获得正确的并发行为——比在每个工具内部手写锁安全得多。值得注意的是，下一章的主角 <code>Agent</code> 工具也声明了 <code>isConcurrencySafe() → true</code>：正因如此，模型一轮发出的多个 SubAgent 才能落进同一个并发批次、真正并行派生。</p>
+  <p><span class="role">给产品经理</span>这套机制是"快而不乱"的技术基础：Agent 能同时读多个文件、搜多个模式，写操作却始终有序。Claude Code 处理大型代码库快，读操作真并发是主要原因之一。</p>
 </div>
 
 <h2 id="s3-4">3.4 MCP 工具统一接入</h2>
 
-<p>到目前为止我们讨论的都是"内置工具"——Bash、Read、Edit 这类随 Claude Code 发布的工具。但 Claude Code 还支持一类"外部工具"：通过 <strong>MCP（Model Context Protocol）</strong> 协议接入的第三方工具，比如数据库查询工具、Figma 设计工具、Slack 消息工具等。这些工具的代码不在 Claude Code 里，而是运行在外部进程中。</p>
+<p>前三节讨论的都是内置工具。Claude Code 还支持通过 <strong>MCP（Model Context Protocol）</strong>接入的第三方工具——数据库查询、Figma、Slack 等——它们的代码运行在外部进程里。工具系统面临的问题是：外部工具如何享受与内置工具完全一致的调度、权限和结果处理？</p>
 
 <div class="concept">
   <div class="concept-label">概念 · MCP（Model Context Protocol）</div>
-  <p><span class="term">MCP（Model Context Protocol）</span>是 Anthropic 提出的开放协议，定义了 LLM 应用与外部工具 / 数据源之间的标准通信接口。MCP 服务端（Server）是一个独立进程，暴露工具定义和调用接口；MCP 客户端（Client）是嵌入在 LLM 应用里的连接器，负责发现工具、传递调用请求、接收结果。</p>
-  <p>MCP 的核心价值是<strong>标准化</strong>：任何人都可以按照协议实现一个 MCP Server，让任何支持 MCP 的 AI 应用立刻获得这个工具的能力，无需修改 AI 应用本身的代码。</p>
+  <p><span class="term">MCP</span> 是 Anthropic 提出的开放协议，定义 LLM 应用与外部工具/数据源之间的标准接口：Server 是独立进程，暴露工具定义与调用端点；Client 嵌在 LLM 应用里，负责发现工具、转发调用。核心价值是标准化——任何人实现一个 MCP Server，所有支持 MCP 的 AI 应用立刻获得该能力。</p>
 </div>
 
 <p>MCP 工具在 Claude Code 内部的接入点是 <code>services/mcp/client.ts</code>。当一个 MCP Server 连接后，Claude Code 遍历它暴露的所有工具定义，把每个工具"改造"成一个符合 <code>Tool</code> 接口的本地对象（<code>client.ts:1768</code>）：</p>
@@ -3252,7 +3257,7 @@ for (const tool of mcpTools) {
   tools.push(mcpTool)
 }</code></pre>
 
-<p>关键在第①步：MCP 工具通过 <code>annotations</code>（工具元数据）声明自己的属性，Claude Code 把这些声明<strong>自动翻译成本地调度属性</strong>。一个数据库查询工具在 MCP 定义里标注了 <code>readOnlyHint: true</code>，Claude Code 就自动把它放进并发批次；一个会写文件的工具标注了 <code>destructiveHint: true</code>，就串行执行并在权限层弹出额外警告。外部工具无缝融入了内置工具的调度体系，无需特殊处理。</p>
+<p>关键在第①步：MCP 协议的 <code>annotations</code> 元数据被<strong>自动翻译成本地调度属性</strong>。数据库查询工具标注 <code>readOnlyHint: true</code>，就自动进入并发批次；标注 <code>destructiveHint: true</code> 的工具串行执行并在权限层触发额外警告。注意 <code>?? false</code> 的写法——3.2 节的 fail-closed 原则延伸到了信任边界之外：annotations 是外部 Server 自报的，<strong>没声明的一律按最坏情况（写操作）处理</strong>。适配完成后，调度器完全看不出一个工具是内置的还是外部的。</p>
 
 <div class="figure">
   <div class="figure-head">
@@ -3319,14 +3324,11 @@ for (const tool of mcpTools) {
 
 <h2 id="s3-5">3.5 ToolSearch——工具的懒加载</h2>
 
-<p>随着 MCP 生态的发展，一个重型 Claude Code 实例可能挂载几十个 MCP Server，每个 Server 暴露数十个工具。把所有工具的完整 Schema 全部写进 System Prompt，一个 Prompt 就要消耗数万 token——既慢又贵，而且大多数工具在当次任务里根本用不到。</p>
-
-<p>这是一个经典的"按需加载"问题，Claude Code 的解法叫 <strong>ToolSearch</strong>。</p>
+<p>MCP 解决了"接入"，却制造了新问题：一个重型实例可能挂载几十个 Server、数百个工具，把所有 Schema 全部写进 System Prompt 要消耗数万 token——既慢又贵，而且大多数工具当次任务根本用不到。Claude Code 的解法叫 <strong>ToolSearch</strong>。</p>
 
 <div class="concept">
   <div class="concept-label">概念 · ToolSearch（工具懒加载）</div>
-  <p>ToolSearch 是一种<span class="term">延迟加载（lazy loading）</span>机制：默认只在 System Prompt 里列出工具的名字（"告知存在"），不发完整 Schema；模型通过调用 <code>ToolSearch</code> 工具，用关键词查询、加载某个工具的完整 Schema，然后才能调用它。</p>
-  <p>这与浏览器里的代码分割（code splitting）思路完全相同：先加载框架和首屏代码，剩余功能等到真正需要时才动态拉取。</p>
+  <p>ToolSearch 把"声明存在"和"提供完整用法"拆成两个阶段：System Prompt 里默认只列延迟工具的<strong>名字</strong>；模型需要时先调 <code>ToolSearch</code> 拉取完整 Schema，再发起真正的调用。与浏览器的代码分割（code splitting）思路相同——先加载首屏，其余按需拉取。</p>
 </div>
 
 <p>一个工具是否"被延迟加载"由两个条件决定（<code>toolSearch.ts:isDeferredTool</code>）：</p>
@@ -3342,43 +3344,23 @@ export function isDeferredTool(tool: Tool): boolean {
   return tool.shouldDefer === true              // 内置工具显式标记可延迟
 }</code></pre>
 
-<p>当 ToolSearch 模式开启时，System Prompt 里看起来是这样的：</p>
+<p>两阶段流程在消息层面长这样：</p>
 
-<pre><code class="language-text"># System Prompt（精简示意）
-可用工具（立即可用，完整 schema 已附）：
-  Bash, Read, Edit, Write, Grep, Glob, Agent, ToolSearch ...
+<pre><code class="language-text"># System Prompt：内置工具带完整 schema；延迟工具只有名字
+可用工具： Bash, Read, Edit, Grep, Agent, ToolSearch ...
+&lt;system-reminder&gt; deferred tools（先调 ToolSearch 才能用）：
+  mcp__figma__get_design_context, mcp__slack__send_message, ...
+&lt;/system-reminder&gt;
 
-&lt;system-reminder&gt;
-  deferred tools（需先调 ToolSearch 加载 schema）：
-  mcp__figma__get_design_context
-  mcp__figma__generate_figma_design
-  mcp__linear__authenticate
-  mcp__slack__send_message
-  ... （仅名字，无参数描述）
-&lt;/system-reminder&gt;</code></pre>
+# 第一步：模型拉取 schema
+tool_use:   ToolSearch { query: "select:mcp__figma__get_design_context" }
+tool_result: &lt;functions&gt;{"name": "mcp__figma__get_design_context",
+             "parameters": {...完整 schema...}}&lt;/functions&gt;
 
-<p>当模型想用 Figma 工具时，先调用 ToolSearch：</p>
+# 第二步：该工具从此可以正常调用（schema 已在上下文中，本会话内复用）
+tool_use:   mcp__figma__get_design_context { ... }</code></pre>
 
-<pre><code class="language-json">// 模型发出的工具调用
-{
-  "type": "tool_use",
-  "name": "ToolSearch",
-  "input": {
-    "query": "select:mcp__figma__get_design_context"
-  }
-}
-
-// ToolSearch 返回（函数签名变得可调用）
-{
-  "type": "tool_result",
-  "content": "&lt;functions&gt;
-    &lt;function&gt;{\"name\": \"mcp__figma__get_design_context\",
-               \"description\": \"...\",
-               \"parameters\": {...complete schema...}}&lt;/function&gt;
-  &lt;/functions&gt;"
-}</code></pre>
-
-<p>拿到完整 Schema 后，模型就可以在下一步调用 <code>mcp__figma__get_design_context</code> 了。这个"ToolSearch → 实际工具调用"的两步流程，带来了约 40% 的首屏 token 节省，代价是多一轮往返（当命中缓存时几乎可以忽略，因为结果可以在模型的上下文中重用）。</p>
+<p>代价是多一轮往返，收益是首屏 token 节省约 40%——而且 Schema 一旦进入上下文就可以在整个会话中复用，往返成本只付一次。</p>
 
 <div class="insight">
   <div class="insight-label">设计启示</div>
@@ -3430,9 +3412,9 @@ yield MessageUpdate → query.ts 收集 toolResults[]
 
 <h2>本章代码</h2>
 
-<p>本章的示例工具在 <code>code/examples/tool_demo.py</code>。它实现了一个迷你版工具系统：Tool 接口定义、<code>buildTool</code> 工厂、<code>partitionToolCalls</code> 分批算法、以及 <code>runTools</code> 调度器——与真实源码结构一一对应，但去掉了 React 渲染和 MCP 连接的部分，专注于本章的核心调度逻辑。</p>
+<p>本章的示例在 <code>code/examples/tool_demo.py</code>。它实现了一个迷你版工具系统：Tool 接口定义、<code>build_tool</code> 工厂（fail-closed 默认值）、<code>partition_tool_calls</code> 保序分批、以及带并发上限的 <code>run_tools</code> 调度器——与真实源码结构一一对应，但去掉了模型调用与渲染部分，纯本地模拟调度，无需 API Key 即可运行。</p>
 
-<pre><code class="language-python"># 运行（需先设置 ANTHROPIC_API_KEY）
+<pre><code class="language-python"># 纯本地运行，无需 API Key
 cd code
 uv run python examples/tool_demo.py</code></pre>
 
@@ -3478,16 +3460,559 @@ async def all(generators, cap) → ...       # all()
 <p class="chapter-subtitle">
   实现目标：主 Agent 能派出 SubAgent 并行干活，SubAgent 看不到父 Agent 的历史，结果干净返回。
 </p>
-<h2>4.1 SubAgent 派生原理</h2>
-<p>（内容待填）</p>
-<h2>4.2 上下文隔离机制</h2>
-<p>（内容待填）</p>
-<h2>4.3 同步与异步派发</h2>
-<p>（内容待填）</p>
-<h2>4.4 SubAgent 拆分约束</h2>
-<p>（内容待填）</p>
-<h2>4.5 Worktree 文件系统隔离</h2>
-<p>（内容待填）</p>
+
+<h2>引言 · 把循环装进工具里</h2>
+
+<p>第一章建立了 Agent 的最小结构：一个消息数组 + 一个 while 循环 + 一组工具。本章只需要一个递归转折就能推出全部内容：<strong>循环本身也可以被包装成一个工具</strong>。Claude Code 里的 <code>Agent</code> 工具（源码里叫 AgentTool）就是这么一个东西——它的 <code>call()</code> 方法内部跑的不是一段函数逻辑，而是一个完整的、全新的 <code>query()</code> 循环。父 Agent 调用它，就像调用 Read 或 Bash 一样自然；区别只是这个"工具"的执行过程本身又是一个会思考、会调工具的 Agent。</p>
+
+<p>为什么需要这层递归？答案是<strong>上下文经济学</strong>。父 Agent 的上下文窗口是整个系统里最稀缺的资源：在大型代码库里搜索一个问题，可能要读几十个文件、产生几百 KB 的中间结果，而最终有用的结论往往只有二十行。如果这些搜索过程全发生在父 Agent 的窗口里，窗口很快被"过程噪音"塞满，触发压缩、丢失早期信息。SubAgent 的本质是一个<strong>一次性的、可丢弃的上下文窗口</strong>——把高体积低价值的"过程"隔离在子窗口里烧掉，只把低体积高价值的"结论"带回父窗口。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">架构总图</span>
+    <span class="figure-title">SubAgent 派生结构：一个循环孵化另一个循环 <span class="hint">— 注意穿过隔离边界的只有两条细通道</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 430" role="img" aria-label="SubAgent 派生架构总图">
+    <style>
+      .f4-0 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f4-0 .lt{font-size:13px;font-weight:700}
+      .f4-0 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;fill:#6e6353}
+      .f4-0 .ld{font-size:11px;fill:#5a5346}
+      .f4-0 .pipe{stroke:#c3bcae;stroke-width:1.6;fill:none}
+    </style>
+    <defs>
+      <marker id="f40a" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#2563EB"/></marker>
+      <marker id="f40b" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+    </defs>
+    <g class="f4-0">
+      <!-- Parent agent box -->
+      <rect x="14" y="16" width="300" height="398" rx="14" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".45"/>
+      <text class="lt" x="164" y="44" text-anchor="middle" fill="#2563EB">父 Agent（主循环）</text>
+      <rect x="30" y="60" width="268" height="56" rx="9" fill="#fff" stroke="#2563EB" stroke-opacity=".35"/>
+      <text class="ls" x="42" y="80">messages[]  ← 用户对话、工具结果、</text>
+      <text class="ls" x="42" y="96">              几十轮积累的完整历史</text>
+      <rect x="30" y="126" width="268" height="40" rx="9" fill="#fff" stroke="#2563EB" stroke-opacity=".35"/>
+      <text class="ls" x="42" y="143">System Prompt（主 Agent 人格）</text>
+      <text class="ls" x="42" y="158">工具池 · 权限上下文 · AbortController</text>
+
+      <!-- AgentTool call -->
+      <rect x="30" y="188" width="268" height="64" rx="9" fill="#2563EB" opacity=".88"/>
+      <text x="164" y="212" text-anchor="middle" font-size="12.5" font-weight="700" fill="#fff">Agent 工具调用（就是一个普通 tool_use）</text>
+      <text x="164" y="232" text-anchor="middle" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="10" fill="#dbe7ff">Agent({ prompt, subagent_type, ... })</text>
+
+      <rect x="30" y="336" width="268" height="56" rx="9" fill="#fff" stroke="#1F8F5F" stroke-opacity=".55"/>
+      <text class="ls" x="42" y="356" fill="#1F8F5F">tool_result ← 只有子 Agent 的最终文本</text>
+      <text class="ls" x="42" y="372" fill="#1F8F5F">（+ agentId、usage、worktreePath）</text>
+
+      <!-- Isolation membrane -->
+      <line x1="352" y1="16" x2="352" y2="414" stroke="#C8344E" stroke-width="2" stroke-dasharray="7 5" stroke-opacity=".55"/>
+      <text x="352" y="10" text-anchor="middle" font-size="10.5" fill="#C8344E" font-weight="600">上下文隔离边界</text>
+
+      <!-- Channels -->
+      <path class="pipe" d="M298,208 C340,208 340,84 388,84" stroke="#2563EB" marker-end="url(#f40a)"/>
+      <text x="345" y="140" text-anchor="middle" font-size="10.5" fill="#2563EB" transform="rotate(-90 345 140)">① prompt（唯一入口）</text>
+      <path class="pipe" d="M388,364 C340,364 340,364 298,364" stroke="#1F8F5F" marker-end="url(#f40b)"/>
+      <text x="360" y="300" text-anchor="middle" font-size="10.5" fill="#1F8F5F" transform="rotate(-90 360 300)">② 最终文本（唯一出口）</text>
+
+      <!-- Child agent box -->
+      <rect x="388" y="16" width="318" height="398" rx="14" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="lt" x="547" y="44" text-anchor="middle" fill="#1F8F5F">子 Agent（全新的完整循环）</text>
+
+      <rect x="404" y="60" width="286" height="48" rx="9" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ls" x="416" y="79">messages[] = [ prompt ]   ← 从零开始，</text>
+      <text class="ls" x="416" y="95">                            看不到父的历史</text>
+
+      <rect x="404" y="118" width="286" height="88" rx="9" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ld" x="416" y="137" font-weight="600" fill="#3a3326">每次派生独立组装：</text>
+      <text class="ls" x="416" y="154">System Prompt ← AgentDefinition 专属人格</text>
+      <text class="ls" x="416" y="170">工具池        ← 按类型过滤（无 Agent 工具）</text>
+      <text class="ls" x="416" y="186">模型 · 权限模式 · readFileState 缓存</text>
+      <text class="ls" x="416" y="202">AbortController（sync 共享 / async 独立）</text>
+
+      <rect x="404" y="216" width="286" height="120" rx="9" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".4"/>
+      <text class="ld" x="416" y="235" font-weight="600" fill="#3a3326">子循环内部（父完全看不见）：</text>
+      <text class="ls" x="416" y="254">while(true):  读 30 个文件、</text>
+      <text class="ls" x="416" y="270">  grep 12 次、跑测试、走弯路、</text>
+      <text class="ls" x="416" y="286">  产生 200KB 中间结果……</text>
+      <text class="ls" x="416" y="310" fill="#C8344E">全部烧在自己的窗口里，</text>
+      <text class="ls" x="416" y="326" fill="#C8344E">结束即丢弃（transcript 落盘可查）</text>
+
+      <rect x="404" y="346" width="286" height="46" rx="9" fill="#1F8F5F" opacity=".85"/>
+      <text x="547" y="366" text-anchor="middle" font-size="11.5" font-weight="700" fill="#fff">最后一条 assistant 文本 = 返回值</text>
+      <text x="547" y="382" text-anchor="middle" font-size="10" fill="#dff2e8">"结论 20 行"，而不是"过程 200KB"</text>
+    </g>
+  </svg>
+  <div class="figure-cap">SubAgent 的全部原理：AgentTool 在 call() 里孵化一个全新的 query() 循环。穿过隔离边界的只有两条通道——prompt 进、最终文本出；父的历史不下去，子的过程噪音不上来。</div>
+</div>
+
+<div class="goal-card">
+  <div class="goal-card-label">本章目标</div>
+  <p>读完这章，你会理解：AgentTool 如何用一个普通 Tool 接口孵化完整子循环（4.1）、隔离边界上到底有什么能穿过/什么被拦下（4.2）、同步与异步派发在生命周期上的四个差异（4.3）、为什么子 Agent 不能再派生子 Agent 以及 prompt 该怎么写（4.4）、多个并行 Agent 同时写文件时 Worktree 如何兜底（4.5）。</p>
+</div>
+
+<h2 id="s4-1">4.1 派生原理——AgentTool 只是一个普通工具</h2>
+
+<p>先看接口。AgentTool 对调度器、对模型而言与 Read、Bash 没有任何区别——它实现同一个 <code>Tool</code> 接口，声明同样的调度属性（<code>AgentTool.tsx</code>）：</p>
+
+<pre><code class="language-typescript">// AgentTool.tsx — 输入 schema（精简）
+const inputSchema = z.object({
+  description:       z.string(),         // 3-5 词的任务摘要（给 UI 展示）
+  prompt:            z.string(),         // 子 Agent 收到的完整任务书
+  subagent_type:     z.string().optional(),   // 用哪种 Agent 定义
+  model:             z.enum(['sonnet','opus','haiku']).optional(),
+  run_in_background: z.boolean().optional(),   // 异步派发（4.3）
+  isolation:         z.enum(['worktree']).optional(),  // 文件系统隔离（4.5）
+})
+
+// 关键声明：派生是并发安全的
+isConcurrencySafe() { return true },
+isReadOnly()        { return true },  // 权限检查下放给子 Agent 内部的每个工具</code></pre>
+
+<p><code>isConcurrencySafe() → true</code> 直接接上了第三章的调度器：模型在同一轮发出三个 <code>Agent</code> 调用，<code>partitionToolCalls</code> 会把它们合并进同一个并发批次——<strong>多个 SubAgent 并行派生不需要任何专门的多 Agent 框架，它只是工具调度的自然结果</strong>。而 <code>isReadOnly() → true</code> 乍看违反直觉（子 Agent 明明可能写文件），其实是权限的转授：派生动作本身不碰任何状态，真正的写操作会在子循环内部逐一走自己的权限检查。</p>
+
+<h3>4.1.1 AgentDefinition——每种子 Agent 是一份"人格配置"</h3>
+
+<p><code>subagent_type</code> 参数选择一份 <strong>AgentDefinition</strong>：它决定子 Agent 的系统提示词（人格）、工具白名单、模型、权限模式。定义来自两个来源：内置定义（<code>builtInAgents.ts</code>：general-purpose、Explore、Plan 等）和用户自定义——一个带 frontmatter 的 Markdown 文件（<code>.claude/agents/*.md</code>，由 <code>loadAgentsDir.ts</code> 加载）：</p>
+
+<pre><code class="language-markdown">---
+name: code-reviewer
+description: 审查代码变更，找出正确性问题。代码提交前使用。
+tools: Read, Grep, Glob, Bash        # 工具白名单（省略 = 全部）
+model: sonnet                        # 省略 = 继承父模型
+permissionMode: default              # 也可 plan / acceptEdits
+mcpServers: [github]                 # 可以挂自己专属的 MCP Server
+---
+你是资深代码审查员。收到任务后先 git diff 查看变更，
+逐文件检查正确性、边界条件、错误处理……
+（正文即子 Agent 的 System Prompt）</code></pre>
+
+<p>内置的 Explore 是理解这套机制的最佳样本：它的系统提示词开头就是 <em>"You are a file search specialist… READ-ONLY MODE"</em>，工具白名单只有读操作，且被明确要求"尽可能并行发出多个 grep / read"。也就是说，<strong>一种 agent 类型 = 一份提示词人格 + 一份工具白名单 + 一组默认参数</strong>，定义与执行机制完全解耦——新增一种子 Agent 不需要写一行 TypeScript。</p>
+
+<h3>4.1.2 runAgent——七步装配</h3>
+
+<p>选定定义后，<code>runAgent</code>（<code>runAgent.ts:248</code>）把一个子循环从零装配出来：</p>
+
+<pre><code class="language-typescript">// runAgent.ts — 装配骨架（大幅精简）
+export async function* runAgent({ agentDefinition, promptMessages, ... }) {
+  // ① 解析模型：调用参数 > 定义的 model > 继承父模型
+  const model = getAgentModel(agentDefinition.model, parentModel, modelParam)
+  const agentId = createAgentId()                       // ② 独立身份
+
+  // ③ 初始消息：只有任务书，没有父的历史（隔离的起点）
+  const initialMessages = [...promptMessages]
+
+  // ④ 工具池：按定义过滤，Agent 工具本身被移除（4.4 拆分约束）
+  const tools = resolveAgentTools(agentDefinition, availableTools, isAsync)
+
+  // ⑤ 系统提示词：用定义正文重建，不是父的 System Prompt
+  const systemPrompt = await getAgentSystemPrompt(agentDefinition, ...)
+
+  // ⑥ 隔离上下文：新 readFileState、新/共享 AbortController（4.3）
+  const ctx = createSubagentContext(toolUseContext, { agentId, ... })
+
+  // ⑦ 跑一个完整的 Agent Loop——与第一章的循环是同一个函数
+  for await (const message of query({
+    messages: initialMessages, systemPrompt, toolUseContext: ctx,
+    maxTurns: agentDefinition.maxTurns,
+  })) {
+    await recordSidechainTranscript([message], agentId)  // 过程落盘可审计
+    yield message
+  }
+}</code></pre>
+
+<p>第⑦步值得停一秒：子 Agent 调用的 <code>query()</code> 与父 Agent 的主循环是<strong>同一个函数</strong>。没有"子 Agent 运行时"这种东西——整套系统只有一个 Agent Loop 实现，SubAgent 只是用不同的参数再跑一遍它。递归结构的美感在于此：第一章的循环、本章的子循环、第五章的 Worker，全是同一段代码。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>"把 Agent 包装成工具"意味着多 Agent 能力不需要独立的编排框架：派生走工具调用、并行走工具调度（第三章）、结果回传走 tool_result 注入（第一章）。已有的三套机制拼起来就是多 Agent 系统。如果你在设计自己的 Agent 架构，先问一句：我真的需要编排层吗，还是递归复用已有的循环就够了？</p>
+</div>
+
+<h2 id="s4-2">4.2 上下文隔离机制</h2>
+
+<p>隔离不是"顺便"的实现细节，而是 SubAgent 的价值所在。上一节第③步已经出现了隔离的核心：<code>initialMessages = [...promptMessages]</code>——子 Agent 的消息数组从任务书开始，父 Agent 几十轮的历史一个字节都不带。配套地，<code>createSubagentContext</code>（<code>forkedAgent.ts:345</code>）把运行时状态逐项拆开：该克隆的克隆、该新建的新建、该共享的显式声明共享：</p>
+
+<pre><code class="language-typescript">// forkedAgent.ts:345 — 隔离清单（精简）
+function createSubagentContext(parent, overrides) {
+  return {
+    readFileState: cloneFileStateCache(...),   // 文件缓存：克隆，互不污染
+    abortController: overrides.shareAbortController
+      ? parent.abortController                  // sync：父按 ESC 一起停
+      : createChildAbortController(...),        // async：独立生死（4.3）
+    setAppState: overrides.shareSetAppState
+      ? parent.setAppState                      // sync：可以更新全局状态
+      : () => {},                               // async：全局状态只读（no-op）
+    // 任务注册必须始终能到达根 store——否则子 Agent 的后台
+    // bash 进程永远无法被清理，变成 PPID=1 的僵尸进程
+    setAppStateForTasks: parent.setAppStateForTasks ?? parent.setAppState,
+  }
+}</code></pre>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">隔离清单</span>
+    <span class="figure-title">隔离边界上：什么能穿过，什么被拦下 <span class="hint">— 两条绿色通道，四类红色拦截</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 300" role="img" aria-label="上下文隔离边界示意图">
+    <style>
+      .f4-2 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f4-2 .lt{font-size:12.5px;font-weight:700}
+      .f4-2 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;fill:#6e6353}
+      .f4-2 .ld{font-size:11.5px;fill:#5a5346}
+    </style>
+    <defs>
+      <marker id="f42g" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+    </defs>
+    <g class="f4-2">
+      <rect x="14" y="20" width="200" height="260" rx="12" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".45"/>
+      <text class="lt" x="114" y="46" text-anchor="middle" fill="#2563EB">父 Agent</text>
+      <rect x="506" y="20" width="200" height="260" rx="12" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="lt" x="606" y="46" text-anchor="middle" fill="#1F8F5F">子 Agent</text>
+
+      <line x1="360" y1="14" x2="360" y2="286" stroke="#C8344E" stroke-width="2" stroke-dasharray="7 5" stroke-opacity=".55"/>
+
+      <!-- Allowed crossings -->
+      <path d="M214,74 L506,74" stroke="#1F8F5F" stroke-width="2" fill="none" marker-end="url(#f42g)"/>
+      <rect x="252" y="56" width="216" height="22" rx="6" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text x="360" y="71" text-anchor="middle" font-size="11" fill="#1F8F5F" font-weight="600">✓ prompt 任务书（进）</text>
+
+      <path d="M506,120 L214,120" stroke="#1F8F5F" stroke-width="2" fill="none" marker-end="url(#f42g)"/>
+      <rect x="238" y="102" width="244" height="22" rx="6" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text x="360" y="117" text-anchor="middle" font-size="11" fill="#1F8F5F" font-weight="600">✓ 最终文本 + usage + worktree 信息（出）</text>
+
+      <!-- Blocked（左右错行，避免标签相撞） -->
+      <line x1="214" y1="158" x2="342" y2="158" stroke="#C8344E" stroke-width="1.8" stroke-opacity=".7"/>
+      <text x="348" y="162" font-size="13" fill="#C8344E" font-weight="700">✗</text>
+      <text x="222" y="152" font-size="10" fill="#C8344E">父的对话历史、CLAUDE.md</text>
+
+      <line x1="506" y1="186" x2="378" y2="186" stroke="#C8344E" stroke-width="1.8" stroke-opacity=".7"/>
+      <text x="362" y="190" font-size="13" fill="#C8344E" font-weight="700">✗</text>
+      <text x="392" y="180" font-size="10" fill="#C8344E">子的工具调用噪音</text>
+
+      <line x1="214" y1="214" x2="342" y2="214" stroke="#C8344E" stroke-width="1.8" stroke-opacity=".7"/>
+      <text x="348" y="218" font-size="13" fill="#C8344E" font-weight="700">✗</text>
+      <text x="222" y="208" font-size="10" fill="#C8344E">父的会话级权限批准</text>
+
+      <line x1="506" y1="242" x2="378" y2="242" stroke="#C8344E" stroke-width="1.8" stroke-opacity=".7"/>
+      <text x="362" y="246" font-size="13" fill="#C8344E" font-weight="700">✗</text>
+      <text x="392" y="236" font-size="10" fill="#C8344E">子的中间推理、走过的弯路</text>
+
+      <text x="360" y="272" text-anchor="middle" font-size="11" fill="#9a8f7b">例外通道：fork 模式（4.2.2）会把父历史整体复制给子——为了共享 prompt cache</text>
+    </g>
+  </svg>
+  <div class="figure-cap">隔离边界的默认规则：穿过去的只有 prompt 和最终文本。父的历史、权限批准不下去；子的过程噪音、中间推理不上来。</div>
+</div>
+
+<h3>4.2.1 隔离粒度细到"按类型裁剪注入"</h3>
+
+<p>隔离不只是"不给"，还包括"给多少"。源码里有两段注释暴露了这套系统运行的真实规模（<code>runAgent.ts:386</code>）：</p>
+
+<pre><code class="language-typescript">// Read-only agents (Explore, Plan) don't act on commit/PR/lint rules from
+// CLAUDE.md — the main agent has full context and interprets their output.
+// Dropping claudeMd here saves ~5-15 Gtok/week across 34M+ Explore spawns.
+const shouldOmitClaudeMd = agentDefinition.omitClaudeMd && ...
+
+// Explore/Plan are read-only search agents — the parent-session-start
+// gitStatus (up to 40KB, explicitly labeled stale) is dead weight.
+// Saves ~1-3 Gtok/week fleet-wide.</code></pre>
+
+<p>Explore 每周被派生 3400 万次。CLAUDE.md 里的提交规范、gitStatus 快照对一个只读搜索 Agent 毫无用处，但每次派生都要为它们付 token。按类型裁剪注入内容，一周省下 5~15 G token——<strong>当派生规模到了千万级，上下文注入的每一段都是要算经济账的</strong>。这也反过来解释了为什么 AgentDefinition 要有 <code>omitClaudeMd</code> 这种看起来琐碎的字段：隔离机制的设计粒度是跟着真实成本走的。</p>
+
+<h3>4.2.2 例外：fork 模式反向而行</h3>
+
+<p>有一类任务恰恰需要父的完整上下文——"顺着我们刚才的讨论，把这个修完"。为此 AgentTool 提供 fork 路径（省略 <code>subagent_type</code> 时触发，<code>forkSubagent.ts</code>）：把父的整个 <code>messages[]</code> 复制给子（<code>forkContextMessages</code>），先用 <code>filterIncompleteToolCalls</code> 清掉未完成的工具调用避免 API 报错，并通过 <code>useExactTools</code> 让子沿用父的工具数组、thinking 配置——目标是让子的 API 请求前缀与父<strong>逐字节一致</strong>，从而命中同一份 prompt cache。</p>
+
+<p>fork 和 fresh 是上下文经济学的两个极端解：fresh 派生付出"重新交代背景"的成本，换来干净的窗口；fork 派生付出"复制整个窗口"的成本，但由于缓存命中，这份复制几乎免费。判据也随之不同——fresh 适合独立子问题，fork 适合"接着当前语境干，但过程噪音别回来"的活。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>隔离与缓存是一对天然矛盾：隔离要求上下文不同，缓存要求上下文相同。Claude Code 没有折中，而是把两个极端都做成显式选项（fresh / fork），让调用方按任务性质选择。当你发现两个设计目标相互拉扯时，"提供两个都纯粹的模式"往往优于"提供一个都不纯粹的折中"。</p>
+  <p><span class="role">给产品经理</span>"Explore 一周 3400 万次派生"这个数字值得记住：SubAgent 不是高级功能，而是 Claude Code 每个会话都在大量使用的基础操作。子 Agent 的启动延迟、上下文成本的任何优化，都会被这个乘数放大。</p>
+</div>
+
+<h2 id="s4-3">4.3 同步与异步派发</h2>
+
+<p>同一个 <code>runAgent</code>，一个 <code>isAsync</code> 标志切出两种完全不同的生命周期。差异集中在四件事上：</p>
+
+<pre><code class="language-typescript">// runAgent.ts:524 — 差异①：生死绑定
+const agentAbortController = isAsync
+  ? new AbortController()          // async：独立控制器。用户按 ESC 中断
+                                   // 父 Agent 时，后台子 Agent 继续活着
+  : toolUseContext.abortController // sync：共享父控制器，一起生一起死
+
+// runAgent.ts:440 — 差异②：权限降级（又是 fail-closed）
+// async 无法弹出交互式权限框 → 拿不到批准的操作自动拒绝
+if (shouldAvoidPrompts) {
+  toolPermissionContext = { ...ctx, shouldAvoidPermissionPrompts: true }
+}</code></pre>
+
+<p>差异③是<strong>结果的送达方式</strong>。sync 派生阻塞父的这一轮：父循环等子循环跑完，把最终文本作为 tool_result 直接接上。async 派生立即返回一个"已启动"的 tool_result，其中的措辞是设计的一部分（<code>AgentTool.tsx:1328</code>）——它明确告诉父模型接下来该怎么表现：</p>
+
+<pre><code class="language-text">Async agent launched successfully.
+agentId: agent-xxx（内部 ID，可用 SendMessage 继续对话）
+The agent is working in the background. You will be notified
+automatically when it completes.
+output_file: .../agent-xxx.output   ← 可以 tail 看进度，但——
+Do not duplicate this agent's work.  ← 别抢它的活
+（子 Agent 完成后，结果以 task-notification 的形式
+  出现在父 Agent 后续某一轮的消息里）</code></pre>
+
+<p>差异④是<strong>工具池</strong>：async 子 Agent 的工具被 <code>ASYNC_AGENT_ALLOWED_TOOLS</code> 白名单再过滤一遍——不能 <code>AskUserQuestion</code>（没有终端可问）、不能进 Plan 模式（没人批准计划）。凡是需要"人在场"的能力，后台一律没有。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">时序对比</span>
+    <span class="figure-title">sync 阻塞派发 vs async 后台派发 <span class="hint">— 注意 ESC 中断的作用范围</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 300" role="img" aria-label="同步与异步派发时序对比">
+    <style>
+      .f4-3 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f4-3 .tl{font-size:11.5px;font-weight:600}
+      .f4-3 .ts{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;fill:#9a8f7b}
+    </style>
+    <defs><marker id="f43a" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#c3bcae"/></marker></defs>
+    <g class="f4-3">
+      <!-- sync -->
+      <text class="tl" x="14" y="30" fill="#3a3326">sync（默认）</text>
+      <text class="tl" x="14" y="58" fill="#2563EB">父</text>
+      <rect x="40" y="44" width="120" height="20" rx="5" fill="#2563EB" opacity=".75"/>
+      <rect x="160" y="44" width="230" height="20" rx="5" fill="#d9d3c7" opacity=".55"/>
+      <text x="275" y="58" text-anchor="middle" font-size="10.5" fill="#5a5346">阻塞等待（可随时转后台）</text>
+      <rect x="390" y="44" width="150" height="20" rx="5" fill="#2563EB" opacity=".75"/>
+      <text x="465" y="58" text-anchor="middle" font-size="10" fill="#fff">收到 tool_result 继续</text>
+      <text class="tl" x="14" y="90" fill="#1F8F5F">子</text>
+      <rect x="160" y="76" width="230" height="20" rx="5" fill="#1F8F5F" opacity=".75"/>
+      <text x="275" y="90" text-anchor="middle" font-size="10" fill="#fff">完整子循环 → 最终文本</text>
+      <text class="ts" x="548" y="58">ESC 中断：父子一起停</text>
+
+      <line x1="14" y1="122" x2="706" y2="122" stroke="#e5e5e0"/>
+
+      <!-- async -->
+      <text class="tl" x="14" y="148" fill="#3a3326">async（run_in_background: true）</text>
+      <text class="tl" x="14" y="180" fill="#2563EB">父</text>
+      <rect x="40" y="166" width="90" height="20" rx="5" fill="#2563EB" opacity=".75"/>
+      <rect x="130" y="166" width="76" height="20" rx="5" fill="#6D45C9" opacity=".8"/>
+      <text x="168" y="180" text-anchor="middle" font-size="9.5" fill="#fff">async_launched</text>
+      <rect x="206" y="166" width="200" height="20" rx="5" fill="#2563EB" opacity=".75"/>
+      <text x="306" y="180" text-anchor="middle" font-size="10" fill="#fff">立即继续干别的（不重叠的活）</text>
+      <rect x="500" y="166" width="180" height="20" rx="5" fill="#2563EB" opacity=".75"/>
+      <text x="590" y="180" text-anchor="middle" font-size="10" fill="#fff">收到通知，消化子结论</text>
+
+      <text class="tl" x="14" y="216" fill="#1F8F5F">子</text>
+      <rect x="130" y="202" width="330" height="20" rx="5" fill="#1F8F5F" opacity=".75"/>
+      <text x="295" y="216" text-anchor="middle" font-size="10" fill="#fff">后台完整子循环（独立 AbortController，权限自动拒绝）</text>
+      <path d="M460,212 C480,212 480,186 498,180" stroke="#c3bcae" stroke-width="1.5" fill="none" marker-end="url(#f43a)"/>
+      <text class="ts" x="470" y="240">task-notification 注入父的后续轮次</text>
+
+      <text class="ts" x="14" y="272">ESC 中断：只停父。后台子 Agent 继续跑，需要 chat:killAgents 显式终止</text>
+      <text class="ts" x="14" y="290">sync 也可中途转后台：Promise.race(下一条消息, backgroundSignal)，AgentTool.tsx:886</text>
+    </g>
+  </svg>
+  <div class="figure-cap">sync 共享父的生死与终端；async 独立存活、权限降级、结果以通知形式异步送达。sync 与 async 之间不是硬边界——阻塞中的 sync Agent 可以随时被转入后台。</div>
+</div>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>async 派生的权限处理再次体现 fail-closed：后台 Agent 弹不出权限框，系统的选择不是"降低门槛放行"，而是"拿不到批准就拒绝"。注意这要求任务本身适合后台化——需要频繁授权的任务放后台会寸步难行，这是拆分决策（4.4）要考虑的约束之一。</p>
+</div>
+
+<h2 id="s4-4">4.4 SubAgent 拆分约束</h2>
+
+<p>机制讲完了，剩下的问题是"怎么用对"。约束分三层：结构上不能做什么、prompt 上应该写什么、什么任务值得拆。</p>
+
+<h3>4.4.1 结构约束：递归只有一层</h3>
+
+<p>装配工具池时（4.1 第④步），<code>filterToolsForAgent</code> 默认把 <code>Agent</code> 工具从子 Agent 的池里移除（<code>constants/tools.ts:36</code>）——子 Agent 不能再派生子 Agent。三个理由：<strong>成本失控</strong>（每层派生都是乘数，两层 = 平方级 token）；<strong>可观测性</strong>（用户在终端只能看到一层进度，孙子 Agent 的行为无处展示）；<strong>权限链断裂</strong>（父批准的是"派一个子"，孙子的操作离授权语境已经太远）。需要更深的层级时，答案不是嵌套，而是第五章的协调器模式——星形拓扑，所有 Worker 都直连同一个 Coordinator。</p>
+
+<h3>4.4.2 Prompt 约束：像给新同事交代任务</h3>
+
+<p>子 Agent 看不到父的历史（4.2），这个机制事实直接决定了 prompt 的写法。AgentTool 的工具描述里，官方给模型的指令是这么写的（<code>prompt.ts</code>，意译）：</p>
+
+<ul>
+  <li><strong>零上下文假设</strong>："像给一个刚走进房间的聪明同事交代任务——他没看过这场对话，不知道你试过什么。"要交代目标、已排除的方向、足够的背景，让对方能自己做判断。</li>
+  <li><strong>不许外包理解</strong>：禁止写"根据你的调研结果修掉这个 bug"这种 prompt——这是把"综合理解"推给了子 Agent。正确的写法要证明你自己已经理解了：给出文件路径、行号、具体改什么。</li>
+  <li><strong>查找给命令，调查给问题</strong>：确定性查找直接给出精确命令；开放性调查只给问题本身——预设的步骤在前提错误时全是死重。</li>
+  <li><strong>别偷看、别抢跑</strong>（async）：不要中途去读子 Agent 的 output_file（会把它的过程噪音拉回自己的窗口，隔离白做了）；在通知到达前不许编造或预测子 Agent 的结论。</li>
+</ul>
+
+<h3>4.4.3 拆分判据：结论体积 ≪ 过程体积</h3>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">决策图</span>
+    <span class="figure-title">这个任务要不要拆给 SubAgent？</span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 250" role="img" aria-label="SubAgent 拆分决策图">
+    <style>
+      .f4-4 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f4-4 .q{font-size:11.5px;font-weight:600;fill:#3a3326}
+      .f4-4 .a{font-size:10.5px;fill:#9a8f7b}
+      .f4-4 .r{font-size:11px;font-weight:700}
+      .f4-4 .arr{stroke:#c3bcae;stroke-width:1.5;fill:none}
+    </style>
+    <defs><marker id="f44a" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#c3bcae"/></marker></defs>
+    <g class="f4-4">
+      <rect x="14" y="30" width="188" height="52" rx="10" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".5"/>
+      <text class="q" x="108" y="52" text-anchor="middle">任务的中间过程，</text>
+      <text class="q" x="108" y="68" text-anchor="middle">之后还需要回看吗？</text>
+
+      <path class="arr" d="M202,56 L252,56" marker-end="url(#f44a)"/>
+      <text class="a" x="227" y="48" text-anchor="middle">否</text>
+      <path class="arr" d="M108,82 L108,196" marker-end="url(#f44a)"/>
+      <text class="a" x="120" y="140">是</text>
+      <rect x="34" y="196" width="148" height="38" rx="10" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="r" x="108" y="219" text-anchor="middle" fill="#2563EB">自己做，不拆</text>
+
+      <rect x="252" y="30" width="188" height="52" rx="10" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".5"/>
+      <text class="q" x="346" y="52" text-anchor="middle">结论体积远小于</text>
+      <text class="q" x="346" y="68" text-anchor="middle">过程体积？（搜索/调研/审查）</text>
+
+      <path class="arr" d="M440,56 L490,56" marker-end="url(#f44a)"/>
+      <text class="a" x="465" y="48" text-anchor="middle">是</text>
+      <path class="arr" d="M346,82 L346,196" marker-end="url(#f44a)"/>
+      <text class="a" x="358" y="140">否，但想沿用当前语境</text>
+      <rect x="272" y="196" width="148" height="38" rx="10" fill="#F1ECFB" stroke="#6D45C9" stroke-opacity=".5"/>
+      <text class="r" x="346" y="219" text-anchor="middle" fill="#6D45C9">fork 派生（4.2.2）</text>
+
+      <rect x="490" y="30" width="216" height="52" rx="10" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".5"/>
+      <text class="q" x="598" y="52" text-anchor="middle">要写文件，且与父或其他</text>
+      <text class="q" x="598" y="68" text-anchor="middle">Agent 并行？</text>
+
+      <path class="arr" d="M598,82 L598,120" marker-end="url(#f44a)"/>
+      <text class="a" x="610" y="106">是</text>
+      <rect x="490" y="120" width="216" height="38" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="r" x="598" y="143" text-anchor="middle" fill="#1F8F5F">SubAgent + isolation: worktree</text>
+
+      <path class="arr" d="M510,82 C476,100 474,170 486,212" marker-end="url(#f44a)"/>
+      <text class="a" x="458" y="152">否</text>
+      <rect x="490" y="196" width="216" height="38" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="r" x="598" y="219" text-anchor="middle" fill="#1F8F5F">SubAgent（fresh 派生）</text>
+    </g>
+  </svg>
+  <div class="figure-cap">拆分判据一句话：中间过程不需要回看、结论远小于过程 → 拆；全程语境不能断 → 自己做或 fork；并行写文件 → 加 worktree 隔离（4.5）。</div>
+</div>
+
+<h2 id="s4-5">4.5 Worktree 文件系统隔离</h2>
+
+<p>第三章的"写独占"调度有一个隐含边界：它只管<strong>一个 Agent 的一轮之内</strong>的工具调用。多个并行 SubAgent 是各自独立的循环，各有各的调度器——两个后台 Agent 同时改同一个文件，没有任何机制拦截。上下文隔离解决了"记忆打架"，文件系统这层需要自己的隔离方案。</p>
+
+<div class="concept">
+  <div class="concept-label">概念 · git worktree</div>
+  <p><span class="term">git worktree</span> 是 Git 的原生功能：为同一个仓库检出多个工作目录，它们<strong>共享同一个对象库</strong>（.git），只是各自有独立的工作区和分支。因此创建成本是毫秒级、磁盘增量只有工作区文件本身——远轻于 clone。这让"每个 Agent 一个独立副本"从奢侈品变成日常操作。</p>
+</div>
+
+<p>派生时带上 <code>isolation: "worktree"</code>，AgentTool 在装配前多做一步（<code>worktree.ts:902</code>）：</p>
+
+<pre><code class="language-typescript">// AgentTool.tsx:590 + worktree.ts:902（精简）
+if (effectiveIsolation === 'worktree') {
+  const slug = `agent-${agentId.slice(0, 8)}`
+  // ① 在主仓库的 .claude/worktrees/ 下建工作树 + 临时分支，
+  //    并记下当前 HEAD（之后判断"有没有改动"的基准）
+  worktreeInfo = await createAgentWorktree(slug)   // { worktreePath, headCommit, ... }
+}
+// ② 子 Agent 的整个执行包进 cwd 覆盖——它眼中的"项目根目录"就是工作树
+runWithCwdOverride(worktreeInfo.worktreePath, () => runAgent(...))
+
+// ③ 子 Agent 结束后：对比 headCommit 判断去留
+const changed = await hasWorktreeChanges(worktreePath, headCommit)
+if (!changed) await removeAgentWorktree(...)   // 没改动 → 无痕清理
+else keep()   // 有改动 → 保留，worktreePath/Branch 写进 tool_result，父来决定合并</code></pre>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">生命周期</span>
+    <span class="figure-title">Agent Worktree：创建 → 隔离执行 → 按变更决定去留</span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 240" role="img" aria-label="Worktree 生命周期图">
+    <style>
+      .f4-5 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f4-5 .lt{font-size:12px;font-weight:700}
+      .f4-5 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;fill:#6e6353}
+      .f4-5 .ld{font-size:10.5px;fill:#5a5346}
+      .f4-5 .arr{stroke:#c3bcae;stroke-width:1.6;fill:none}
+    </style>
+    <defs><marker id="f45a" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#c3bcae"/></marker></defs>
+    <g class="f4-5">
+      <rect x="14" y="24" width="150" height="130" rx="12" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="lt" x="89" y="48" text-anchor="middle" fill="#2563EB">主仓库</text>
+      <text class="ls" x="30" y="72">.git（对象库，共享）</text>
+      <text class="ls" x="30" y="90">main 工作区</text>
+      <text class="ls" x="30" y="116">headCommit 记为</text>
+      <text class="ls" x="30" y="132">去留判断基准 ─┐</text>
+
+      <path class="arr" d="M164,70 L232,70" marker-end="url(#f45a)"/>
+      <text class="ld" x="198" y="60" text-anchor="middle">① 创建</text>
+
+      <rect x="232" y="24" width="240" height="130" rx="12" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="lt" x="352" y="48" text-anchor="middle" fill="#1F8F5F">.claude/worktrees/agent-3fa2c81b</text>
+      <text class="ls" x="248" y="72">独立工作区 + 临时分支</text>
+      <text class="ls" x="248" y="90">共享 .git → 毫秒级创建</text>
+      <rect x="248" y="102" width="208" height="38" rx="8" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ld" x="352" y="118" text-anchor="middle">② 子 Agent 全程在此执行</text>
+      <text class="ls" x="352" y="133" text-anchor="middle">runWithCwdOverride(worktreePath)</text>
+
+      <path class="arr" d="M472,70 L540,70" marker-end="url(#f45a)"/>
+      <text class="ld" x="506" y="60" text-anchor="middle">③ 结束时</text>
+
+      <rect x="540" y="24" width="166" height="58" rx="10" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".5"/>
+      <text class="ld" x="623" y="46" text-anchor="middle" font-weight="600">无变更（纯调研）</text>
+      <text class="ls" x="623" y="66" text-anchor="middle">→ 自动删除，无痕</text>
+
+      <rect x="540" y="96" width="166" height="58" rx="10" fill="#FBF1E6" stroke="#C77D2B" stroke-opacity=".55"/>
+      <text class="ld" x="623" y="118" text-anchor="middle" font-weight="600">有变更（改了代码）</text>
+      <text class="ls" x="623" y="138" text-anchor="middle">→ 保留，路径回传父</text>
+      <path class="arr" d="M506,70 C520,70 524,125 538,125" marker-end="url(#f45a)"/>
+
+      <text class="ld" x="360" y="188" text-anchor="middle">④ 有变更时：tool_result 附带 worktreePath + worktreeBranch，合并决策权在父 Agent / 用户手里</text>
+      <text class="ls" x="360" y="212" text-anchor="middle">非 git 项目：WorktreeCreate / WorktreeRemove hooks 接管（支持任意 VCS，此时一律保留不自动删）</text>
+    </g>
+  </svg>
+  <div class="figure-cap">Worktree 隔离的收尾逻辑与"结论回传"同构：过程（工作树）默认丢弃，只有产生了变更（结论）才保留并回传路径，合并权留给父。</div>
+</div>
+
+<p>注意收尾策略的分寸感：系统<strong>自动创建、自动清理，但从不自动合并</strong>。子 Agent 的改动躺在临时分支上，tool_result 只回传路径和分支名——要不要合、怎么合，是父 Agent（最终是用户）的决策。机器负责隔离，人负责合流，这与权限系统"工具声明、用户批准"的边界划分是同一种哲学。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>本章出现了三层互补的隔离，各管一个资源维度：上下文隔离（4.2）管记忆、AbortController 分树（4.3）管生死、worktree（4.5）管文件系统。做多 Agent 系统时值得照着清点一遍：还有哪个共享资源没有隔离方案？（提示：第六章的 Mailbox 管的是通信这一维。）</p>
+  <p><span class="role">给产品经理</span>"并行改代码会不会互相踩"是用户对多 Agent 最本能的担忧。worktree 隔离给出的答案是可感知的：每个 Agent 在自己的副本里干活，改动以分支形式交付。这不只是技术方案，也是信任方案。</p>
+</div>
+
+<hr>
+
+<h2>本章代码</h2>
+
+<p>本章的示例在 <code>code/examples/subagent_demo.py</code>。它在第一章 Agent Loop 骨架的基础上实现了一个迷你 AgentTool：父循环通过 <code>spawn_agent</code> 工具派生子循环，子循环拿到隔离的消息数组与受限工具池，跑完后只把最终文本返回父循环——纯本地模拟，无需 API Key。</p>
+
+<pre><code class="language-python"># 纯本地运行，无需 API Key
+cd code
+uv run python examples/subagent_demo.py</code></pre>
+
+<p>骨架与源码的对应关系：</p>
+
+<pre><code class="language-text"># subagent_demo.py 骨架                  ←→  src/ 路径
+
+@dataclass                               # AgentDefinition
+class AgentDefinition:                   #   tools/AgentTool/loadAgentsDir.ts
+  agent_type: str                        #   （frontmatter 字段）
+  system_prompt: str
+  allowed_tools: list[str]
+
+def resolve_agent_tools(...)             # resolveAgentTools()
+                                         #   tools/AgentTool/agentToolUtils.ts:122
+                                         #   （移除 spawn_agent 防递归）
+
+async def run_agent(definition, prompt)  # runAgent()
+                                         #   tools/AgentTool/runAgent.ts:248
+                                         #   （隔离 messages → 子循环 → 最终文本）
+
+spawn_agent 工具（is_concurrency_safe）  # AgentTool.call()
+                                         #   tools/AgentTool/AgentTool.tsx</code></pre>
+
 <div class="page-nav">
   <button class="page-nav-btn" onclick="showPage('ch3')">
     <span class="nav-dir">← 上一章</span>
@@ -3607,13 +4132,14 @@ async def all(generators, cap) → ...       # all()
 <table>
   <thead><tr><th>章节</th><th>文件</th><th>关键函数 / 类</th></tr></thead>
   <tbody>
-    <tr><td>第 1 章</td><td><code>src/query.ts</code></td><td><code>query()</code> / <code>queryLoop()</code></td></tr>
-    <tr><td>第 2 章</td><td><code>src/services/tools/toolOrchestration.ts</code></td><td><code>runTools()</code></td></tr>
-    <tr><td>第 3 章</td><td><code>src/tools/AgentTool/AgentTool.tsx</code></td><td><code>call()</code></td></tr>
-    <tr><td>第 4 章</td><td><code>src/coordinator/coordinatorMode.ts</code></td><td><code>getCoordinatorSystemPrompt()</code></td></tr>
-    <tr><td>第 5 章</td><td><code>src/utils/mailbox.ts</code></td><td><code>Mailbox</code> class</td></tr>
-    <tr><td>第 6 章</td><td><code>src/utils/permissions/</code></td><td><code>canUseTool()</code></td></tr>
-    <tr><td>第 7 章</td><td><code>src/utils/sessionStorage.ts</code></td><td><code>writeAgentMetadata()</code></td></tr>
+    <tr><td>第 1 章</td><td><code>src/query.ts</code></td><td><code>query()</code></td></tr>
+    <tr><td>第 2 章</td><td><code>src/query.ts</code> / <code>src/context.ts</code></td><td><code>queryLoop()</code> / <code>getSystemContext()</code></td></tr>
+    <tr><td>第 3 章</td><td><code>src/services/tools/toolOrchestration.ts</code> / <code>src/Tool.ts</code></td><td><code>partitionToolCalls()</code> / <code>buildTool()</code></td></tr>
+    <tr><td>第 4 章</td><td><code>src/tools/AgentTool/</code></td><td><code>AgentTool.call()</code> / <code>runAgent()</code> / <code>createSubagentContext()</code></td></tr>
+    <tr><td>第 5 章</td><td><code>src/coordinator/coordinatorMode.ts</code></td><td><code>getCoordinatorSystemPrompt()</code></td></tr>
+    <tr><td>第 6 章</td><td><code>src/utils/mailbox.ts</code></td><td><code>Mailbox</code> class</td></tr>
+    <tr><td>第 7 章</td><td><code>src/utils/permissions/</code></td><td><code>canUseTool()</code></td></tr>
+    <tr><td>第 8 章</td><td><code>src/utils/sessionStorage.ts</code></td><td><code>writeAgentMetadata()</code></td></tr>
   </tbody>
 </table>
 <div class="page-nav">

@@ -786,11 +786,11 @@
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showPage('ch2')">2.1 queryLoop 的职责边界</a>
-        <a class="nav-section" onclick="showPage('ch2')">2.2 Prompt 组装流水线</a>
-        <a class="nav-section" onclick="showPage('ch2')">2.3 Token 预算与 max_tokens 控制</a>
-        <a class="nav-section" onclick="showPage('ch2')">2.4 记忆预取时机</a>
-        <a class="nav-section" onclick="showPage('ch2')">2.5 上下文压缩触发</a>
+        <a class="nav-section" onclick="showSection('ch2','s2-1')">2.1 queryLoop 的职责边界</a>
+        <a class="nav-section" onclick="showSection('ch2','s2-2')">2.2 Prompt 组装流水线</a>
+        <a class="nav-section" onclick="showSection('ch2','s2-3')">2.3 Token 预算与 max_tokens 控制</a>
+        <a class="nav-section" onclick="showSection('ch2','s2-4')">2.4 记忆预取时机</a>
+        <a class="nav-section" onclick="showSection('ch2','s2-5')">2.5 上下文压缩触发</a>
       </div>
     </div>
 
@@ -2048,16 +2048,665 @@ while True:                         # ②  循环     while(true)        query.t
   <div class="figure-cap">Harness（L2）是 Agent Loop 的执行引擎：上接编排层的 SubAgent 派发，内嵌 L1 ReAct 循环，下驱 L0 模型，向右接出工具与外部服务。</div>
 </div>
 
-<h2>2.1 queryLoop 的职责边界</h2>
-<p>（内容待填）</p>
-<h2>2.2 Prompt 组装流水线</h2>
-<p>（内容待填）</p>
-<h2>2.3 Token 预算与 max_tokens 控制</h2>
-<p>（内容待填）</p>
-<h2>2.4 记忆预取时机</h2>
-<p>（内容待填）</p>
-<h2>2.5 上下文压缩触发</h2>
-<p>（内容待填）</p>
+<div class="goal-card">
+  <div class="goal-card-label">本章目标</div>
+  <p>把第一章那个 25 行骨架放进真实环境会遇到什么问题？Token 超了、上下文撑爆了、记忆没加载——Harness 就是专门应对这些问题的外层引擎。读完本章，你能说清楚：<code>queryLoop</code> 和 <code>query</code> 为什么分成两层、Prompt 在送进模型前经历了哪五步加工、Token 预算如何做到"默认省、需要时自动升"、记忆为何不阻塞主循环、以及上下文撑爆时的两套压缩手段各自在什么时机触发。</p>
+</div>
+
+<h2 id="s2-1">2.1 queryLoop 的职责边界</h2>
+
+<p>源码里有两个长得很像的函数——<code>query()</code> 和 <code>queryLoop()</code>。初看容易当成同一件事。它们的真实分工是：</p>
+
+<ul>
+  <li><strong><code>query()</code></strong>：薄壳。唯一的业务逻辑是把 <code>consumedCommandUuids</code> 的生命周期通知分成"正常完成"和"中途异常"两个信号</li>
+  <li><strong><code>queryLoop()</code></strong>：主引擎。整个 Harness 的实现，<code>async generator</code>，驱动 while(true) 循环</li>
+</ul>
+
+<pre><code class="language-typescript">// query.ts:219–239 — query() 是个薄壳
+export async function* query(params: QueryParams) {
+  const consumedCommandUuids: string[] = []
+  const terminal = yield* queryLoop(params, consumedCommandUuids)
+  // yield* 之后的代码只在"正常 return"时执行
+  // throw / .return() 关闭时，以下代码被跳过 → 不发 completed 信号
+  for (const uuid of consumedCommandUuids) {
+    notifyCommandLifecycle(uuid, 'completed')
+  }
+  return terminal
+}</code></pre>
+
+<p>为什么要这样分？因为 <code>consumedCommandUuids</code> 的生命周期信号是不对称的：正常完成发 <code>completed</code>，抛异常或用户中断时不发（而是发 <code>started-without-completed</code>）。<code>yield*</code> 的语义天然实现了这个不对称——throw 穿透、<code>.return()</code> 关闭时，<code>yield*</code> 之后的代码都不会执行。</p>
+
+<div class="concept">
+  <div class="concept-label">概念 · async generator 与 yield*</div>
+  <p><span class="term">async generator</span> 是一种同时支持 <code>await</code>（异步）和 <code>yield</code>（惰性产出）的函数，调用后返回一个异步迭代器，每次 <code>next()</code> 才推进到下一个 <code>yield</code>。<code>yield*</code> 是"委托"——把当前 generator 的所有产出都转交给另一个 generator，直到对方结束才继续。它天然保留了 <code>throw</code> 穿透和提前关闭语义，这是 Claude Code 用它来分离正常结束和异常两条路径的技术基础。</p>
+</div>
+
+<p>进入 <code>queryLoop</code> 后，第一件事是快照所有"不可变配置"，然后构建"可变状态" <code>State</code>：</p>
+
+<pre><code class="language-typescript">// query.ts:268–279 — 可变状态，整轮原子替换
+let state: State = {
+  messages: params.messages,          // 消息历史（核心，见第一章）
+  toolUseContext: params.toolUseContext,
+  maxOutputTokensOverride: undefined, // Token 升级用
+  autoCompactTracking: undefined,     // 压缩状态追踪
+  stopHookActive: undefined,
+  maxOutputTokensRecoveryCount: 0,    // 续写恢复次数
+  hasAttemptedReactiveCompact: false, // 防压缩死循环守卫
+  turnCount: 1,
+  pendingToolUseSummary: undefined,
+  transition: undefined,              // 本轮的"continue 原因"
+}
+</code></pre>
+
+<p>State 里 10 个字段乍看复杂。减负读法：<strong>只有 <code>messages</code> 是业务状态，其余 9 个几乎全是"恢复用的账本"</strong>——记录"上轮为什么重试""compact 到哪一步了""max_tokens 升过几次"。每个 <code>continue</code> 站点不是 9 个散乱赋值，而是通过一行 <code>state = { ...state, 新字段 }</code> 原子替换整个对象，这保证了任意一个 <code>continue</code> 路径下状态的完整性。</p>
+
+<p><code>queryLoop</code> 的职责边界是什么、不是什么，用一张表说清楚：</p>
+
+<table>
+  <thead><tr><th>queryLoop 负责</th><th>queryLoop 不负责（由调用方/Harness 上层完成）</th></tr></thead>
+  <tbody>
+    <tr><td>消息裁剪（<code>getMessagesAfterCompactBoundary</code>）</td><td>System prompt 构建（<code>QueryEngine.submitMessage</code> 进入前完成）</td></tr>
+    <tr><td>Token 预算检查与升级重试</td><td>工具定义注入（通过 <code>toolUseContext.options.tools</code> 传入）</td></tr>
+    <tr><td>流式调用 <code>callModel</code></td><td>CLAUDE.md 读取（prompt 组装阶段完成）</td></tr>
+    <tr><td>工具执行（<code>runTools</code>）</td><td>记忆文件扫描（loop 之前启动预取）</td></tr>
+    <tr><td>Proactive/Reactive 上下文压缩</td><td></td></tr>
+    <tr><td>Stop hook 处理</td><td></td></tr>
+  </tbody>
+</table>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>把"配置快照"和"可变状态"分成两个对象，是构建可恢复循环的关键。配置在进入循环时固化，不被循环内的重试改变；可变状态原子替换而非字段逐个赋值，保证了任何中断点都能看到一致视图。自己实现长期运行的 Agent 循环时，这个"两对象分离 + 原子替换"的模式值得直接借鉴。</p>
+</div>
+
+<h2 id="s2-2">2.2 Prompt 组装流水线</h2>
+
+<p>第一章说"每轮把整个 messages 数组发给模型"，但 messages 里的第一条——system prompt——在进入 <code>queryLoop</code> 之前已经被精心加工过。它不是一个字符串，而是一个<strong>字符串数组</strong>，每个元素代表一个"节"（section）。这个设计背后隐藏着一套精心维护的 prompt cache 策略。</p>
+
+<div class="concept">
+  <div class="concept-label">概念 · Prompt Cache</div>
+  <p>Anthropic API 支持 prompt caching：把 system prompt 里不会变化的前缀打上 <code>cache_control: {type: "ephemeral"}</code> 标记，服务端首次处理后缓存这段内容的 KV（5 分钟 TTL），后续命中的请求跳过这部分的 prefill 计算，直接从缓存恢复——速度提升 60–85%，命中的 token 费用折扣到原价约 10%。<strong>代价</strong>：缓存只对"完全相同的前缀"有效，任何一个字符改变都会使缓存失效。所以 Claude Code 把"绝对不变"和"每轮可能变"的内容严格分到两个不同的 cache 块里。</p>
+</div>
+
+<p>组装流程分五步，可以分为两大阶段：<strong>"进 loop 之前的 prompt 构建"</strong>（步骤 1–3）和<strong>"进 loop 之后每轮的实时附加"</strong>（步骤 4）：</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">流程图</span>
+    <span class="figure-title">Prompt 组装流水线</span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 800 310" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Prompt组装流水线">
+    <defs>
+      <marker id="p-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill="#0C9486"/>
+      </marker>
+      <marker id="p-arr2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill="#6D45C9"/>
+      </marker>
+      <style>
+        .psvg text { font-family:'Inter','Noto Sans SC',system-ui,sans-serif; }
+        .psvg .ttl  { font-size:13px; font-weight:700; fill:#1a1a18; }
+        .psvg .sub  { font-family:'JetBrains Mono',ui-monospace,monospace; font-size:10px; fill:#6e6353; }
+        .psvg .num  { font-size:12px; font-weight:700; fill:#fff; }
+        .psvg .zone { font-family:'JetBrains Mono',ui-monospace,monospace; font-size:10px; font-weight:700; }
+        .psvg .cap  { font-size:10.5px; fill:#52524e; }
+      </style>
+    </defs>
+    <g class="psvg">
+
+      <!-- ── Zone bands ── -->
+      <rect x="10"  y="8" width="466" height="18" rx="4" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".35"/>
+      <text x="243" y="21" class="zone" fill="#1F8F5F" text-anchor="middle">进入 queryLoop 之前（一次完成）</text>
+
+      <rect x="484" y="8" width="306" height="18" rx="4" fill="#EEF3FF" stroke="#2563EB" stroke-opacity=".35"/>
+      <text x="637" y="21" class="zone" fill="#2563EB" text-anchor="middle">每次 turn 实时执行</text>
+
+      <line x1="476" y1="6" x2="476" y2="300" stroke="#d9d3c7" stroke-width="1" stroke-dasharray="4 3"/>
+
+      <!-- ══ Step 1 ══ -->
+      <rect x="10" y="34" width="140" height="178" rx="9" fill="#F0FAFA" stroke="#0C9486" stroke-width="1.4"/>
+      <circle cx="30" cy="50" r="11" fill="#0C9486"/>
+      <text x="30" y="54.5" class="num" text-anchor="middle">1</text>
+      <text x="84" y="52" class="ttl">静态前缀</text>
+      <!-- sections -->
+      <rect x="20" y="64"  width="120" height="17" rx="4" fill="#fff" stroke="#0C9486" stroke-opacity=".3"/>
+      <text x="80" y="76"  class="sub" text-anchor="middle">intro（身份定义）</text>
+      <rect x="20" y="84"  width="120" height="17" rx="4" fill="#fff" stroke="#0C9486" stroke-opacity=".3"/>
+      <text x="80" y="96"  class="sub" text-anchor="middle">system（系统环境）</text>
+      <rect x="20" y="104" width="120" height="17" rx="4" fill="#fff" stroke="#0C9486" stroke-opacity=".3"/>
+      <text x="80" y="116" class="sub" text-anchor="middle">doing_tasks</text>
+      <rect x="20" y="124" width="120" height="17" rx="4" fill="#fff" stroke="#0C9486" stroke-opacity=".3"/>
+      <text x="80" y="136" class="sub" text-anchor="middle">actions</text>
+      <rect x="20" y="144" width="120" height="17" rx="4" fill="#fff" stroke="#0C9486" stroke-opacity=".3"/>
+      <text x="80" y="156" class="sub" text-anchor="middle">using_tools</text>
+      <rect x="20" y="164" width="120" height="17" rx="4" fill="#fff" stroke="#0C9486" stroke-opacity=".3"/>
+      <text x="80" y="176" class="sub" text-anchor="middle">tone_and_style</text>
+      <!-- cache badge -->
+      <rect x="20" y="186" width="120" height="18" rx="4" fill="#0C9486" fill-opacity=".12"/>
+      <text x="80" y="198.5" class="sub" fill="#0C9486" text-anchor="middle" font-weight="700">cache: global ★</text>
+
+      <!-- BOUNDARY -->
+      <text x="221" y="229" class="sub" fill="#b7ad9c" text-anchor="middle" font-size="9">── DYNAMIC_BOUNDARY ──</text>
+
+      <!-- ══ Step 2 ══ -->
+      <rect x="162" y="34" width="136" height="88" rx="9" fill="#FFFBF0" stroke="#C77D2B" stroke-width="1.4"/>
+      <circle cx="182" cy="50" r="11" fill="#C77D2B"/>
+      <text x="182" y="54.5" class="num" text-anchor="middle">2</text>
+      <text x="238" y="52" class="ttl">动态节</text>
+      <text x="230" y="68" class="sub" text-anchor="middle">memory（MEMORY.md）</text>
+      <text x="230" y="84" class="sub" text-anchor="middle">env_info · language</text>
+      <text x="230" y="100" class="sub" text-anchor="middle">token_budget · scratchpad</text>
+      <rect x="172" y="108" width="116" height="7" rx="3" fill="#C77D2B" fill-opacity=".15"/>
+      <text x="230" y="116" class="sub" fill="#C77D2B" text-anchor="middle" font-weight="700">cache: null</text>
+
+      <!-- arrow 2→3 -->
+      <line x1="298" y1="78" x2="314" y2="78" stroke="#0C9486" stroke-width="1.3" marker-end="url(#p-arr)"/>
+
+      <!-- ══ Step 3 ══ -->
+      <rect x="316" y="34" width="148" height="100" rx="9" fill="#F5F0FE" stroke="#6D45C9" stroke-width="1.4"/>
+      <circle cx="336" cy="50" r="11" fill="#6D45C9"/>
+      <text x="336" y="54.5" class="num" text-anchor="middle">3</text>
+      <text x="404" y="52" class="ttl" text-anchor="middle">QueryEngine 合并</text>
+      <text x="390" y="72" class="sub" text-anchor="middle">customPrompt（可完全覆盖）</text>
+      <text x="390" y="88" class="sub" text-anchor="middle">+ memoryMechanics</text>
+      <text x="390" y="104" class="sub" text-anchor="middle">+ appendSystemPrompt</text>
+      <text x="390" y="120" class="sub" fill="#9a8f7b" text-anchor="middle">企业策略 / SDK 自定义走这里</text>
+
+      <!-- Collect arrows 1+2 → 3 -->
+      <line x1="150" y1="104" x2="158" y2="104" stroke="#0C9486" stroke-width="1.3"/>
+      <line x1="158" y1="78"  x2="158" y2="115" stroke="#0C9486" stroke-width="1.3"/>
+      <line x1="158" y1="78"  x2="314" y2="78"  stroke="#0C9486" stroke-width="1.3" marker-end="url(#p-arr)"/>
+
+      <!-- ══ Step 4 ══ -->
+      <rect x="486" y="34" width="140" height="80" rx="9" fill="#EEF3FF" stroke="#2563EB" stroke-width="1.4"/>
+      <circle cx="506" cy="50" r="11" fill="#2563EB"/>
+      <text x="506" y="54.5" class="num" text-anchor="middle">4</text>
+      <text x="555" y="52" class="ttl">尾部上下文</text>
+      <text x="556" y="70" class="sub" text-anchor="middle">appendSystemContext()</text>
+      <text x="556" y="86" class="sub" text-anchor="middle">git status · 当前时间</text>
+      <rect x="496" y="96" width="120" height="7" rx="3" fill="#2563EB" fill-opacity=".2"/>
+      <text x="556" y="105" class="sub" fill="#2563EB" text-anchor="middle" font-weight="700">每 turn 重新附加</text>
+
+      <!-- arrow 3→4 -->
+      <line x1="464" y1="84" x2="484" y2="84" stroke="#6D45C9" stroke-width="1.3" marker-end="url(#p-arr2)"/>
+
+      <!-- ══ Step 5 ══ -->
+      <rect x="486" y="130" width="140" height="68" rx="9" fill="#F5F0FE" stroke="#6D45C9" stroke-width="1.4"/>
+      <circle cx="506" cy="146" r="11" fill="#6D45C9"/>
+      <text x="506" y="150.5" class="num" text-anchor="middle">5</text>
+      <text x="555" y="148" class="ttl">工具定义</text>
+      <text x="556" y="166" class="sub" text-anchor="middle">tools[]  独立 API 参数</text>
+      <text x="556" y="182" class="sub" font-weight="700" fill="#6D45C9" text-anchor="middle">不混入 system prompt</text>
+
+      <!-- arrow 4→5 -->
+      <line x1="556" y1="114" x2="556" y2="128" stroke="#6D45C9" stroke-width="1.3" marker-end="url(#p-arr2)"/>
+
+      <!-- ══ API 结构 ══ -->
+      <rect x="648" y="34" width="140" height="220" rx="9" fill="#fffefb" stroke="#d9d3c7" stroke-width="1.3"/>
+      <text x="718" y="52" class="cap" text-anchor="middle" font-weight="700">API system 块</text>
+
+      <rect x="658" y="58"  width="120" height="26" rx="5" fill="#f0f0ec"/>
+      <text x="718" y="70"  class="sub" text-anchor="middle" fill="#9a8f7b">attribution header</text>
+      <text x="718" y="80"  class="sub" text-anchor="middle" fill="#b7ad9c">scope: null</text>
+
+      <rect x="658" y="88"  width="120" height="26" rx="5" fill="#0C9486" fill-opacity=".1" stroke="#0C9486" stroke-opacity=".35"/>
+      <text x="718" y="100" class="sub" text-anchor="middle" font-weight="700" fill="#0C9486">静态前缀</text>
+      <text x="718" y="110" class="sub" text-anchor="middle" fill="#0C9486">scope: global ★</text>
+
+      <rect x="658" y="118" width="120" height="26" rx="5" fill="#C77D2B" fill-opacity=".08" stroke="#C77D2B" stroke-opacity=".35"/>
+      <text x="718" y="130" class="sub" text-anchor="middle" font-weight="700" fill="#C77D2B">动态节</text>
+      <text x="718" y="140" class="sub" text-anchor="middle" fill="#9a8f7b">scope: null</text>
+
+      <rect x="658" y="148" width="120" height="26" rx="5" fill="#2563EB" fill-opacity=".07" stroke="#2563EB" stroke-opacity=".35"/>
+      <text x="718" y="160" class="sub" text-anchor="middle" font-weight="700" fill="#2563EB">git / time</text>
+      <text x="718" y="170" class="sub" text-anchor="middle" fill="#9a8f7b">scope: null</text>
+
+      <line x1="658" y1="186" x2="778" y2="186" stroke="#d9d3c7" stroke-width="1" stroke-dasharray="3 3"/>
+
+      <rect x="658" y="192" width="120" height="26" rx="5" fill="#6D45C9" fill-opacity=".07" stroke="#6D45C9" stroke-opacity=".35"/>
+      <text x="718" y="204" class="sub" text-anchor="middle" font-weight="700" fill="#6D45C9">tools[]</text>
+      <text x="718" y="214" class="sub" text-anchor="middle" fill="#9a8f7b">独立参数，非 system</text>
+
+      <text x="718" y="244" class="sub" text-anchor="middle" fill="#b7ad9c">★ MCP 连接时</text>
+      <text x="718" y="254" class="sub" text-anchor="middle" fill="#b7ad9c">global → org</text>
+
+      <!-- arrows to API block -->
+      <line x1="626" y1="100" x2="646" y2="100" stroke="#6D45C9" stroke-width="1.3" marker-end="url(#p-arr2)"/>
+
+      <!-- BOUNDARY label with arrow indicator -->
+      <line x1="162" y1="215" x2="162" y2="238" stroke="#C77D2B" stroke-width="1" stroke-dasharray="3 3"/>
+      <line x1="298" y1="215" x2="298" y2="238" stroke="#C77D2B" stroke-width="1" stroke-dasharray="3 3"/>
+      <line x1="162" y1="238" x2="298" y2="238" stroke="#C77D2B" stroke-width="1" stroke-dasharray="3 3"/>
+
+    </g>
+  </svg>
+  <div class="figure-cap">步骤 1–3 进入 loop 前完成；步骤 4–5 每轮执行。DYNAMIC_BOUNDARY 标记把静态节（<code>global</code> cache）和动态节（不缓存）切分成两个 system 块，让静态指令跨用户共享缓存。工具定义走独立的 <code>tools[]</code> 参数，不混入 system prompt，避免工具变更破坏 cache。</div>
+</div>
+
+<h3>步骤 1：静态前缀与 prompt cache</h3>
+
+<p><code>getSystemPrompt()</code> 按固定顺序拼接 7 个节：<code>intro → system → doing_tasks → actions → using_tools → tone_and_style → output_efficiency</code>。这 7 个节的内容几乎不随用户输入变化——它们是让 Claude 知道"自己是谁、该怎么做事"的基础指令，是 prompt cache 能长期命中的"压舱石"。</p>
+
+<p>这批节在 API 请求里以 <code>cacheScope: 'global'</code> 发送，意味着跨组织、跨用户共享同一份缓存——同一份静态指令，全球所有 Claude Code 用户共享同一个服务端缓存 KV。</p>
+
+<h3>步骤 2：动态节注册表</h3>
+
+<p>静态前缀之后，插入一个特殊标记：</p>
+
+<pre><code class="language-typescript">// constants/prompts.ts:114–115
+// WARNING: Do not remove or reorder this marker without updating cache logic in:
+//   - src/utils/api.ts (splitSysPromptPrefix)
+//   - src/services/api/claude.ts (buildSystemPromptBlocks)
+export const SYSTEM_PROMPT_DYNAMIC_BOUNDARY = '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__'</code></pre>
+
+<p>注释里的警告不是客套话——<code>splitSysPromptPrefix</code> 在发送 API 请求前扫描这个字符串，把 prompt 数组劈成两半：boundary 之前的走 <code>cacheScope: 'global'</code>，之后的走 <code>cacheScope: null</code>（不缓存）。如果有人不小心删掉或移动了这个标记，全局缓存会静默失效，每次请求多花十几倍的 token 计算费用。</p>
+
+<p>boundary 之后是动态节注册表。每个动态节通过 <code>systemPromptSection(name, factory)</code> 声明，<strong>首次求值后缓存到进程级 Map，直到 <code>/clear</code> 或 <code>/compact</code> 才清除</strong>——这是第二层缓存，防止同一 session 内每轮重新求值：</p>
+
+<pre><code class="language-typescript">// constants/systemPromptSections.ts:20–30
+export function systemPromptSection(name: string, compute: ComputeFn): SystemPromptSection {
+  return { name, compute, cacheBreak: false }  // cacheBreak=false → 进程级缓存
+}
+
+export function DANGEROUS_uncachedSystemPromptSection(
+  name: string, compute: ComputeFn, _reason: string
+): SystemPromptSection {
+  return { name, compute, cacheBreak: true }  // cacheBreak=true → 每轮重算
+}
+
+// 求值时检查缓存
+if (!s.cacheBreak && cache.has(s.name)) {
+  return cache.get(s.name)  // 直接返回缓存值
+}
+const value = await s.compute()
+setSystemPromptSectionCacheEntry(s.name, value)  // 写入缓存</code></pre>
+
+<p>动态节包括：<code>memory</code>（MEMORY.md 截断后注入，最多 200 行 / 25,000 字节）、<code>env_info</code>（工作目录/平台）、<code>language</code>（响应语言）、<code>token_budget</code>（Token 预算提示）等。</p>
+
+<p>唯一例外是 MCP 指令——用 <code>DANGEROUS_uncachedSystemPromptSection</code> 豁免缓存：</p>
+
+<pre><code class="language-typescript">// constants/prompts.ts:510–519
+// Note: MCP instructions are NOT cached because connected MCP clients
+// can change between turns via per-turn recompute, which busts the
+// prompt cache on late MCP connect.
+DANGEROUS_uncachedSystemPromptSection(
+  'mcp_instructions',
+  () => getMcpInstructions(mcpClients),
+  'MCP clients can connect/disconnect between turns'
+),</code></pre>
+
+<p>MCP 服务器可以随时连接或断开，如果缓存了"某个 MCP 工具可用"的信息，而实际上它已断开，模型会尝试调用一个不存在的工具。所以 MCP 节必须每轮重算，代价是每次都会破坏 prompt cache——这是两害相权取其轻的工程决策，并且函数名里的 <code>DANGEROUS_</code> 前缀就是给未来维护者的警告：<em>你要加一个新的 uncached 节，先想清楚为什么</em>。</p>
+
+<h3>步骤 3：QueryEngine 最终合并</h3>
+
+<pre><code class="language-typescript">// QueryEngine.ts:320–325
+const systemPrompt = asSystemPrompt([
+  ...(customPrompt !== undefined ? [customPrompt] : defaultSystemPrompt),
+  ...(memoryMechanicsPrompt ? [memoryMechanicsPrompt] : []),  // SDK 自定义记忆机制
+  ...(appendSystemPrompt    ? [appendSystemPrompt]    : []),  // 外部追加（如企业策略）
+])</code></pre>
+
+<p><code>customPrompt</code> 是 API/SDK 调用方的完全自定义 prompt（完全替代默认 system prompt）；<code>appendSystemPrompt</code> 是追加内容（不替代，叠加）。企业部署时，管理员下发的合规策略就走 <code>appendSystemPrompt</code> 注入。</p>
+
+<h3>步骤 4：尾部实时上下文（每轮执行）</h3>
+
+<p><code>appendSystemContext()</code> 在 <code>queryLoop</code> 入口处调用，把实时变化的数据追加到 system prompt 末尾：当前 git status、当前日期时间等。这些内容每轮可能不同，不能进 prompt cache，所以放到 boundary 之后的末尾，让前面已经缓存的静态块不受影响。</p>
+
+<h3>步骤 5：工具定义——不在 prompt 里</h3>
+
+<p>工具以 API-native <code>tools[]</code> 数组形式传入 <code>callModel</code>，完全独立于 system prompt。这不是偶然的设计，而是为了保护 prompt cache：如果工具定义混进 system prompt，每次新增一个工具、修改一行工具描述，都会使整个 system prompt 的 cache 失效——而 system prompt 通常有几千到一万个 token，失效一次等于白白多花一次 prefill 费用。</p>
+
+<p>把工具定义单独走 tools 参数，工具列表的变化不影响 system prompt cache，两者互不干扰。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>Prompt cache 的命中率，本质上是"你有多少内容在所有请求间保持完全不变"。Claude Code 为了最大化命中率，做了三层隔离：① 静态内容 vs 动态内容分到不同 cache 块；② 动态内容按"进程级缓存 vs 每轮重算"分成普通节和 DANGEROUS 节；③ 工具定义完全移出 system prompt。这三层设计让即使是对话进行到第 50 轮，静态前缀依然能命中跨组织的 global cache。自己构建 Agent 时，第一步要问：哪些 prompt 内容是真正不变的？把它们物理分离到独立的 cache 块。</p>
+</div>
+
+<h2 id="s2-3">2.3 Token 预算与 max_tokens 控制</h2>
+
+<p>每次调用模型时必须传 <code>max_tokens</code>——这不是可选项，而是 Anthropic API 的强制参数。传多少？答案分三层：默认值、升级值、续写值。</p>
+
+<h3>默认值：8k cap 的工程逻辑</h3>
+
+<p>Claude Code 的 <code>max_tokens</code> 默认值并不等于模型上限。当 <code>tengu_otk_slot_v1</code> feature flag 开启时，默认值被钳制在 <code>CAPPED_DEFAULT_MAX_TOKENS = 8_000</code>：</p>
+
+<pre><code class="language-typescript">// utils/context.ts
+export const CAPPED_DEFAULT_MAX_TOKENS = 8_000   // feature flag 开启时的默认
+export const ESCALATED_MAX_TOKENS     = 64_000   // 升级后的上限</code></pre>
+
+<p>为什么只给 8k？AI 服务后端为每个请求预留等于 <code>max_tokens</code> 的内存 slot。实际统计中 p99 的 Claude Code 回答不超过 4,911 tokens，却用 32k/64k 的默认值预留了 8–16 倍资源，白白挤占并发容量。8k 覆盖了超过 99% 的实际场景，对那不到 1% 的长输出请求，通过下面的升级机制透明处理。</p>
+
+<h3>升级机制（escalate）</h3>
+
+<p>当模型以 <code>max_output_tokens</code> 错误返回时，Harness 自动把 <code>max_tokens</code> 升到 64k 并重试同一请求——对用户完全透明：</p>
+
+<pre><code class="language-typescript">// query.ts:1196–1221 — 一次性升级，不是递归
+const capEnabled = getFeatureValue_CACHED_MAY_BE_STALE('tengu_otk_slot_v1', false)
+if (capEnabled && maxOutputTokensOverride === undefined) {
+  logEvent('tengu_max_tokens_escalate', { escalatedTo: ESCALATED_MAX_TOKENS })
+  state = {
+    ...state,
+    maxOutputTokensOverride: ESCALATED_MAX_TOKENS,
+    transition: { reason: 'max_output_tokens_escalate' },
+  }
+  continue  // 用 64k 重跑同一轮
+}</code></pre>
+
+<h3>续写恢复（recovery）</h3>
+
+<p>升级到 64k 后仍被截断？进入续写模式，注入一条 meta 消息推动模型继续输出：</p>
+
+<pre><code class="language-typescript">// query.ts:1224–1252
+// 注入到 messages 里，以 user 角色发给模型
+"Output token limit hit. Resume directly — no apology, no recap,
+ no commentary, no markdown code fences — just continue writing
+ the code / content from where you left off:"</code></pre>
+
+<p>续写最多尝试 <code>MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3</code> 次（<code>maxOutputTokensRecoveryCount</code> 字段计数），之后放弃。3 次上限与 thinking block 有关：thinking block 必须随其所在的 assistant trajectory 完整保留，无限续写会导致 thinking 链断裂。</p>
+
+<h3>Token 预算（TOKEN_BUDGET feature）</h3>
+
+<p><code>query/tokenBudget.ts</code> 实现了一个"推动模型把 token 用够"的机制——与 max_tokens 方向相反，它解决的是模型"能写 5000 字但只写了 500 就收工"的问题：</p>
+
+<pre><code class="language-typescript">// query/tokenBudget.ts — 预算检查核心
+export function checkTokenBudget(
+  tracker: BudgetTracker,
+  budget: number | null,
+  globalTurnTokens: number,
+): TokenBudgetDecision {
+  if (budget === null || budget <= 0) return { action: 'stop', completionEvent: null }
+
+  const pct = Math.round((globalTurnTokens / budget) * 100)
+  // 连续 3 次增量 < 500 token → 认为模型已进入 diminishing returns
+  const isDiminishing =
+    tracker.continuationCount >= 3 &&
+    delta < DIMINISHING_THRESHOLD   // 500 tokens
+
+  if (!isDiminishing && globalTurnTokens < budget * COMPLETION_THRESHOLD) { // 0.9
+    return { action: 'continue' }  // 注入 nudge 消息，驱动模型继续输出
+  }
+  return { action: 'stop', completionEvent: pct >= 95 ? 'budget_reached' : null }
+}</code></pre>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">状态图</span>
+    <span class="figure-title">max_tokens 三级控制流</span>
+  </div>
+  <svg viewBox="0 0 700 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="max_tokens三级控制">
+    <defs>
+      <marker id="t-arr" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto">
+        <path d="M0,0 L5,3 L0,6 Z" fill="#C77D2B"/>
+      </marker>
+      <marker id="t-ok" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto">
+        <path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/>
+      </marker>
+      <style>
+        .tsvg text { font-family:'Inter','Noto Sans SC',system-ui,sans-serif; }
+        .tsvg .bx { font-size:12.5px; font-weight:700; fill:#1a1a18; }
+        .tsvg .sm { font-family:'JetBrains Mono',ui-monospace,monospace; font-size:10px; fill:#6e6353; }
+        .tsvg .ok { font-family:'JetBrains Mono',ui-monospace,monospace; font-size:10px; fill:#1F8F5F; }
+        .tsvg .er { font-family:'JetBrains Mono',ui-monospace,monospace; font-size:10px; fill:#C77D2B; }
+      </style>
+    </defs>
+    <g class="tsvg">
+      <!-- box 1 -->
+      <rect x="20" y="70" width="160" height="56" rx="9" fill="#FBF1E6" stroke="#C77D2B" stroke-width="1.3"/>
+      <text x="100" y="92" class="bx" text-anchor="middle">默认 max_tokens</text>
+      <text x="100" y="108" class="sm" text-anchor="middle">8,000（cap 开启）</text>
+      <text x="100" y="120" class="sm" text-anchor="middle">覆盖 &gt;99% 请求</text>
+
+      <line x1="180" y1="98" x2="218" y2="98" stroke="#C77D2B" stroke-width="1.3" marker-end="url(#t-arr)"/>
+      <text x="199" y="90" class="er" text-anchor="middle">截断</text>
+
+      <!-- box 2 -->
+      <rect x="220" y="70" width="160" height="56" rx="9" fill="#FBF1E6" stroke="#C77D2B" stroke-width="1.3"/>
+      <text x="300" y="92" class="bx" text-anchor="middle">升级 max_tokens</text>
+      <text x="300" y="108" class="sm" text-anchor="middle">64,000（ESCALATED）</text>
+      <text x="300" y="120" class="sm" text-anchor="middle">自动重试，用户无感</text>
+
+      <line x1="380" y1="98" x2="418" y2="98" stroke="#C77D2B" stroke-width="1.3" marker-end="url(#t-arr)"/>
+      <text x="399" y="90" class="er" text-anchor="middle">仍截断</text>
+
+      <!-- box 3 -->
+      <rect x="420" y="70" width="160" height="56" rx="9" fill="#FBF1E6" stroke="#C77D2B" stroke-width="1.3"/>
+      <text x="500" y="92" class="bx" text-anchor="middle">续写恢复</text>
+      <text x="500" y="108" class="sm" text-anchor="middle">注入 meta 消息</text>
+      <text x="500" y="120" class="sm" text-anchor="middle">最多 3 次</text>
+
+      <!-- 正常出口 -->
+      <line x1="100" y1="126" x2="100" y2="160" stroke="#1F8F5F" stroke-width="1.3" marker-end="url(#t-ok)"/>
+      <text x="108" y="150" class="ok">正常完成</text>
+      <line x1="300" y1="126" x2="300" y2="160" stroke="#1F8F5F" stroke-width="1.3" marker-end="url(#t-ok)"/>
+      <text x="308" y="150" class="ok">正常完成</text>
+      <line x1="500" y1="126" x2="500" y2="160" stroke="#1F8F5F" stroke-width="1.3" marker-end="url(#t-ok)"/>
+      <text x="508" y="150" class="ok">完成 / 3次后放弃</text>
+
+      <!-- TOKEN_BUDGET -->
+      <rect x="20" y="18" width="560" height="28" rx="7" fill="#EEF3FF" stroke="#2563EB" stroke-opacity=".5"/>
+      <text x="36" y="36" font-family="'JetBrains Mono',monospace" font-size="10.5" font-weight="700" fill="#2563EB">TOKEN_BUDGET</text>
+      <text x="160" y="36" font-family="'Inter',sans-serif" font-size="11" fill="#5a5346">— 反向推动：输出不足 90% 预算时，注入 nudge 消息驱动模型继续写</text>
+    </g>
+  </svg>
+  <div class="figure-cap">8k → 64k → 续写三级递进。TOKEN_BUDGET 机制方向相反，解决的是"输出过少"问题。</div>
+</div>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>"默认保守、按需升级"是一个在服务端侧和客户端侧都成立的资源管理原则。不要把 max_tokens 设成模型上限——多数 Agent 场景下这是浪费。正确做法：先测量你的 p99 输出长度，用它做默认值，再为真正需要长输出的场景加一条透明升级路径。</p>
+</div>
+
+<h2 id="s2-4">2.4 记忆预取时机</h2>
+
+<p>Claude Code 的记忆系统有两条完全不同的路径，分别解决两个不同问题：</p>
+
+<table>
+  <thead><tr><th>路径</th><th>数据源</th><th>载体</th><th>时机</th><th>特点</th></tr></thead>
+  <tbody>
+    <tr><td><strong>路径 A</strong></td><td><code>MEMORY.md</code> 索引</td><td>system prompt 动态节</td><td>进入 loop 之前</td><td>同步、固定、覆盖所有 turns</td></tr>
+    <tr><td><strong>路径 B</strong></td><td>记忆目录 <code>~/.claude/memory/</code></td><td>tool_result 附件注入</td><td>loop 启动时异步预取</td><td>异步、尽力而为、按相关性筛选</td></tr>
+  </tbody>
+</table>
+
+<h3>路径 A：MEMORY.md 静态索引</h3>
+
+<p><code>MEMORY.md</code> 是一个"指针文件"——每行一个条目，是各记忆文件的摘要指针，不包含内容本身。通过 <code>loadMemoryPrompt()</code> 同步读取，截断到 200 行 / 25,000 字节，拼入 system prompt 动态节。这在 <code>queryLoop</code> 启动之前就已完成，对所有 turns 可见。</p>
+
+<h3>路径 B：relevant_memories 动态预取</h3>
+
+<p><code>queryLoop</code> 进入 <code>while(true)</code> 之前，先启动一次异步预取：</p>
+
+<pre><code class="language-typescript">// query.ts:299–304 — using 绑定，任何退出路径都自动 dispose
+using pendingMemoryPrefetch = startRelevantMemoryPrefetch(
+  state.messages,
+  state.toolUseContext,
+)
+// 此后进入 while(true)，预取在后台跑</code></pre>
+
+<p>关键词是 <code>using</code>——这是 TypeScript 5.2 引入的 Explicit Resource Management 语法，<code>handle[Symbol.dispose]()</code> 会在当前作用域退出时自动执行（包括 throw、<code>.return()</code> 关闭），保证预取的 AbortController 和 telemetry 无论如何都能被正确清理。</p>
+
+<p>预取流程分两步：</p>
+
+<pre><code class="language-typescript">// memdir/findRelevantMemories.ts:39–75
+export async function findRelevantMemories(...): Promise<RelevantMemory[]> {
+  // 第一步：扫描所有 .md 文件，读前 30 行 frontmatter
+  const memories = (await scanMemoryFiles(memoryDir, signal))
+    .filter(m => !alreadySurfaced.has(m.path))  // 过滤本次 session 已经注入过的
+
+  if (memories.length === 0) return []
+
+  // 第二步：调用 Sonnet sideQuery，JSON schema 输出最多 5 个文件名
+  // max_tokens=256，只问"哪些记忆和当前问题相关"
+  const selectedFilenames = await selectRelevantMemories(query, memories, signal, recentTools)
+  // 最后实际读取选中文件，200 行 / 4096 字节截断
+  return readMemoriesForSurfacing(selectedFilenames, memoryDir)
+}</code></pre>
+
+<p>预取完成后，<strong>不立即等待，而是在每个工具执行完成后的间隙轮询消费</strong>：</p>
+
+<pre><code class="language-typescript">// query.ts:1599–1614 — 零等待消费
+if (
+  pendingMemoryPrefetch?.settledAt !== null &&   // 已完成
+  pendingMemoryPrefetch?.consumedOnIteration === -1  // 还没消费过
+) {
+  const memories = await pendingMemoryPrefetch.promise
+  // 过滤掉已通过 FileReadTool 读过的文件（避免重复）
+  const fresh = filterDuplicateMemoryAttachments(memories, readFileState)
+  // 作为 tool_result 附件注入当前 iteration 的 messages
+  attachments.push(...fresh)
+  pendingMemoryPrefetch.consumedOnIteration = iteration
+}
+// 未完成就跳过，下次迭代再试</code></pre>
+
+<div class="concept">
+  <div class="concept-label">概念 · Explicit Resource Management（using 关键字）</div>
+  <p>TypeScript 5.2 / ECMAScript Stage 3 提案引入的资源管理语法。实现了 <code>Symbol.dispose</code> 方法的对象，用 <code>using</code> 声明后，当前作用域（函数、块）退出时会自动调用 <code>dispose()</code>——包括正常返回、抛出异常、generator 的 <code>.return()</code> 关闭。相当于 C# 的 <code>using</code>、Python 的 <code>with</code>。Claude Code 用它来保证记忆预取的 AbortController 无论如何都能被清理，无需手写 try/finally。</p>
+</div>
+
+<p>消费逻辑里还有一个顺序依赖值得单独提：<code>filterDuplicateMemoryAttachments</code> 先过滤、再把新文件写入 <code>readFileState</code>。如果顺序反过来——先写入再过滤——那么预取产生的记忆会被自己的 filter 全部拦截掉（自引用死结）。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>记忆预取是"尽力而为"而非"阻塞等待"的典型案例。用 <code>settledAt</code> 轮询替代 <code>await</code>，保证了记忆加载慢或失败时，主循环不卡、turn 不延迟。这种"我有机会就消费，没机会就下轮再试"的非阻塞附件注入模式，在任何需要"顺手追加额外上下文"的 Agent 场景下都可以直接复用。</p>
+  <p><span class="role">还要注意</span>session 级有 <code>MAX_SESSION_BYTES = 60KB</code> 的累计注入上限——超过后停止预取，compact 后重置计数，自然允许重新注入。这防止了记忆文件无限增长导致的 token 膨胀。</p>
+</div>
+
+<h2 id="s2-5">2.5 上下文压缩触发</h2>
+
+<p>消息数组只增不减，总有一天会把上下文窗口撑爆。Claude Code 有两套压缩手段，分别处理"快满了"和"已经满了"：</p>
+
+<h3>Proactive compact（主动压缩）</h3>
+
+<p>每个 iteration 进入 API 调用之前，检查当前消息量是否超过阈值：</p>
+
+<pre><code class="language-typescript">// services/compact/autoCompact.ts:72–91
+export function getAutoCompactThreshold(model: string): number {
+  const effectiveContextWindow = getEffectiveContextWindowSize(model)
+  // 预留 13,000 tokens 的缓冲，留给压缩本身产生的输出
+  return effectiveContextWindow - AUTOCOMPACT_BUFFER_TOKENS   // 13_000
+}
+// 触发条件：tokenCount(messages) - snipTokensFreed >= autoCompactThreshold
+// snipTokensFreed：history snip 已释放的 tokens，防止刚压缩就误判</code></pre>
+
+<p>阈值 = 上下文窗口 - 13k 缓冲。触发后，调用一次 Sonnet 生成对话摘要，替换旧消息，同轮继续（不 <code>continue</code> 循环，直接用压缩后的 messages 调 API）。有 circuit breaker：连续失败 3 次后停止重试：</p>
+
+<pre><code class="language-typescript">// autoCompact.ts:257–265
+if (tracking?.consecutiveFailures >= MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES) {  // 3
+  return { wasCompacted: false }  // 停止，防止无限调压缩 API
+}</code></pre>
+
+<h3>Reactive compact（被动压缩）</h3>
+
+<p>Proactive compact 没来得及触发，模型调用直接返回了 <code>prompt_too_long</code> 错误。这条路径更复杂，因为存在一个协议冲突：<strong>SDK 调用方约定收到 <code>error</code> 消息就终止 session，但 Harness 还想在 error 之后继续运行 reactive compact</strong>。解决方案是"暂扣（withheld）"：</p>
+
+<pre><code class="language-typescript">// query.ts:811–813 — 在流式循环中暂扣 PTL 错误消息
+if (reactiveCompact?.isWithheldPromptTooLong(message)) {
+  withheld = true   // 先不 yield 给 SDK，内部记录
+  assistantMessages.push(message)
+}
+
+// 流式结束后，按优先级尝试恢复（query.ts:1086–1183）：
+// 优先级 1：context-collapse drain（便宜，重应用已计算的折叠）
+if (hasPendingCollapse && !isCollapseRetry) {
+  state = { ...state, transition: { reason: 'collapse_drain_retry' } }
+  continue
+}
+// 优先级 2：reactive compact（贵，需要调一次 API 生成摘要）
+if (!hasAttemptedReactiveCompact) {
+  const compacted = await reactiveCompact.tryReactiveCompact(...)
+  if (compacted) {
+    state = { ...state, hasAttemptedReactiveCompact: true,
+              transition: { reason: 'reactive_compact_retry' } }
+    continue   // 用压缩后 messages 重试整个 iteration
+  }
+}
+// 两条路都走完还是 PTL：surfacing 错误，return { reason: 'prompt_too_long' }
+yield lastMessage  // 现在才把暂扣的错误消息放出去
+return { reason: 'prompt_too_long' }</code></pre>
+
+<p><code>hasAttemptedReactiveCompact</code> 是防死循环守卫：只允许 reactive compact 尝试一次。没有这个守卫，"reactive compact → 压缩后消息还是太长 → 再次 PTL → 再次 reactive compact → ..."会无限循环烧光 API 调用额度。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">决策树</span>
+    <span class="figure-title">上下文压缩触发路径</span>
+  </div>
+  <svg viewBox="0 0 700 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="上下文压缩决策树">
+    <defs>
+      <marker id="c-y" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+      <marker id="c-n" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#C77D2B"/></marker>
+      <marker id="c-r" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#C8344E"/></marker>
+      <style>
+        .csvg text { font-family:'Inter','Noto Sans SC',system-ui,sans-serif; }
+        .csvg .bn  { font-size:12px; font-weight:700; fill:#1a1a18; }
+        .csvg .bsm { font-family:'JetBrains Mono',ui-monospace,monospace; font-size:9.5px; fill:#6e6353; }
+        .csvg .lbl { font-family:'JetBrains Mono',ui-monospace,monospace; font-size:10px; }
+      </style>
+    </defs>
+    <g class="csvg">
+      <!-- iteration start -->
+      <rect x="270" y="10" width="160" height="36" rx="9" fill="#F0FAFA" stroke="#0C9486" stroke-width="1.3"/>
+      <text x="350" y="32" class="bn" text-anchor="middle">新一轮 iteration</text>
+      <line x1="350" y1="46" x2="350" y2="68" stroke="#0C9486" stroke-width="1.3" marker-end="url(#c-y)"/>
+
+      <!-- proactive check -->
+      <rect x="240" y="70" width="220" height="44" rx="9" fill="#EEF3FF" stroke="#2563EB" stroke-width="1.3"/>
+      <text x="350" y="89" class="bn" text-anchor="middle">超过 proactive 阈值？</text>
+      <text x="350" y="106" class="bsm" text-anchor="middle">tokens ≥ contextWindow − 13k</text>
+
+      <!-- proactive yes -->
+      <line x1="250" y1="92" x2="178" y2="92" stroke="#1F8F5F" stroke-width="1.3" marker-end="url(#c-y)"/>
+      <text x="213" y="86" class="lbl" fill="#1F8F5F">是</text>
+      <rect x="60" y="70" width="116" height="44" rx="9" fill="#E9F5EE" stroke="#1F8F5F" stroke-width="1.3"/>
+      <text x="118" y="89" class="bn" text-anchor="middle" font-size="11.5">Proactive compact</text>
+      <text x="118" y="105" class="bsm" text-anchor="middle">同轮继续，不 continue</text>
+
+      <!-- proactive no / call model -->
+      <line x1="350" y1="114" x2="350" y2="140" stroke="#C77D2B" stroke-width="1.3" marker-end="url(#c-n)"/>
+      <text x="358" y="134" class="lbl" fill="#C77D2B">否 ↓ 调用 API</text>
+
+      <rect x="240" y="142" width="220" height="36" rx="9" fill="#fffefb" stroke="#b7ad9c" stroke-width="1.3"/>
+      <text x="350" y="164" class="bn" text-anchor="middle">返回 prompt_too_long？</text>
+
+      <!-- pLT no -->
+      <line x1="460" y1="160" x2="524" y2="160" stroke="#1F8F5F" stroke-width="1.3" marker-end="url(#c-y)"/>
+      <text x="490" y="153" class="lbl" fill="#1F8F5F">否</text>
+      <rect x="526" y="142" width="110" height="36" rx="9" fill="#E9F5EE" stroke="#1F8F5F" stroke-width="1.3"/>
+      <text x="581" y="164" class="bn" text-anchor="middle" font-size="11.5">正常处理</text>
+
+      <!-- pLT yes -->
+      <line x1="350" y1="178" x2="350" y2="202" stroke="#C8344E" stroke-width="1.3" marker-end="url(#c-r)"/>
+      <text x="358" y="196" class="lbl" fill="#C8344E">是 → 暂扣错误</text>
+
+      <!-- collapse drain -->
+      <rect x="200" y="204" width="300" height="36" rx="9" fill="#FBF1E6" stroke="#C77D2B" stroke-width="1.3"/>
+      <text x="350" y="222" class="bn" text-anchor="middle">collapse drain 可用？</text>
+      <text x="350" y="237" class="bsm" text-anchor="middle">有暂存折叠且非 drain 重试</text>
+
+      <!-- drain yes -->
+      <line x1="200" y1="222" x2="140" y2="222" stroke="#1F8F5F" stroke-width="1.3" marker-end="url(#c-y)"/>
+      <text x="168" y="215" class="lbl" fill="#1F8F5F">是</text>
+      <rect x="60" y="204" width="78" height="36" rx="9" fill="#FBF1E6" stroke="#C77D2B" stroke-width="1.3"/>
+      <text x="99" y="225" class="bn" text-anchor="middle" font-size="11">drain → continue</text>
+
+      <!-- drain no -->
+      <line x1="350" y1="240" x2="350" y2="264" stroke="#C77D2B" stroke-width="1.3" marker-end="url(#c-n)"/>
+      <text x="358" y="258" class="lbl" fill="#C77D2B">否 → reactive compact</text>
+
+      <rect x="180" y="266" width="340" height="26" rx="7" fill="#FBEEE9" stroke="#C8344E" stroke-width="1.3"/>
+      <text x="350" y="283" class="bn" text-anchor="middle" font-size="11.5">成功 → continue / 失败 → prompt_too_long</text>
+    </g>
+  </svg>
+  <div class="figure-cap">两级防线：proactive 在调用前主动压缩，reactive 在错误后被动恢复。drain 优于 reactive compact，因为 drain 只需重应用计算结果，不需要新的 API 调用。</div>
+</div>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>"暂扣"模式（withheld）是处理"内部恢复 vs 外部协议"冲突的通用手法。当你的系统有内部恢复逻辑，但下游消费方约定"收到 error 就终止"时，先把 error 扣在手里，等内部路径跑完，再决定是把成功结果发出去还是释放 error。这避免了修改下游协议或双写两套事件序列。</p>
+  <p><span class="role">给产品经理</span>autocompact 对用户完全透明——他们看到的是"Agent 继续工作"，而不是"上下文超限报错"。这种"引擎层自动兜底"的设计，是 Claude Code 能处理长时间、大项目任务的基础能力之一。</p>
+</div>
 <div class="page-nav">
   <button class="page-nav-btn" onclick="showPage('ch1')">
     <span class="nav-dir">← 上一章</span>

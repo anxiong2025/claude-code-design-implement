@@ -2767,55 +2767,47 @@ return { reason: 'prompt_too_long' }</code></pre>
       .f3-1 .dt{font-size:13px;font-weight:700}
       .f3-1 .dm{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;fill:#6e6353}
       .f3-1 .dsub{font-size:11.5px;fill:#5a5346}
-      .f3-1 .fig-hoverable .hzone{opacity:0;transition:opacity .15s}
-      .f3-1 .fig-hoverable:hover .hzone{opacity:1}
     </style>
     <g class="f3-1">
       <!-- Row 1 -->
-      <g class="fig-hoverable">
+      <g>
         <rect x="14" y="16" width="210" height="84" rx="10" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
-        <rect class="hzone" x="14" y="16" width="210" height="84" rx="10" fill="#2563EB" opacity=".07"/>
         <text class="dt" x="30" y="40" fill="#2563EB">身份</text>
         <text class="dm" x="30" y="58">name · aliases</text>
         <text class="dsub" x="30" y="76">工具的唯一名称 + 兼容旧名</text>
         <text class="dm" x="30" y="92">searchHint · isMcp · isLsp</text>
       </g>
-      <g class="fig-hoverable">
+      <g>
         <rect x="238" y="16" width="210" height="84" rx="10" fill="#F1ECFB" stroke="#6D45C9" stroke-opacity=".5"/>
-        <rect class="hzone" x="238" y="16" width="210" height="84" rx="10" fill="#6D45C9" opacity=".07"/>
         <text class="dt" x="254" y="40" fill="#6D45C9">模式约定</text>
         <text class="dm" x="254" y="58">inputSchema · outputSchema</text>
         <text class="dsub" x="254" y="76">Zod Schema 或 JSON Schema</text>
         <text class="dm" x="254" y="92">inputJSONSchema（MCP 专用）</text>
       </g>
-      <g class="fig-hoverable">
+      <g>
         <rect x="462" y="16" width="244" height="84" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
-        <rect class="hzone" x="462" y="16" width="244" height="84" rx="10" fill="#1F8F5F" opacity=".07"/>
         <text class="dt" x="478" y="40" fill="#1F8F5F">执行</text>
         <text class="dm" x="478" y="58">call(args, ctx, canUse, msg, onProgress)</text>
         <text class="dsub" x="478" y="76">工具的实际逻辑</text>
         <text class="dm" x="478" y="92">maxResultSizeChars（结果截断阈值）</text>
       </g>
       <!-- Row 2 -->
-      <g class="fig-hoverable">
+      <g>
         <rect x="14" y="116" width="210" height="84" rx="10" fill="#FBF1E6" stroke="#C77D2B" stroke-opacity=".5"/>
-        <rect class="hzone" x="14" y="116" width="210" height="84" rx="10" fill="#C77D2B" opacity=".07"/>
         <text class="dt" x="30" y="140" fill="#C77D2B">调度属性</text>
         <text class="dm" x="30" y="158">isConcurrencySafe(input)</text>
         <text class="dm" x="30" y="174">isReadOnly(input)</text>
         <text class="dsub" x="30" y="192">决定并发 or 串行（3.3 节）</text>
       </g>
-      <g class="fig-hoverable">
+      <g>
         <rect x="238" y="116" width="210" height="84" rx="10" fill="#FBEEE9" stroke="#C8344E" stroke-opacity=".5"/>
-        <rect class="hzone" x="238" y="116" width="210" height="84" rx="10" fill="#C8344E" opacity=".07"/>
         <text class="dt" x="254" y="140" fill="#C8344E">权限</text>
         <text class="dm" x="254" y="158">validateInput(input, ctx)</text>
         <text class="dm" x="254" y="174">checkPermissions(input, ctx)</text>
         <text class="dsub" x="254" y="192">前门守卫（3.1 末尾展开）</text>
       </g>
-      <g class="fig-hoverable">
+      <g>
         <rect x="462" y="116" width="244" height="84" rx="10" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".5"/>
-        <rect class="hzone" x="462" y="116" width="244" height="84" rx="10" fill="#9a8f7b" opacity=".07"/>
         <text class="dt" x="478" y="140" fill="#5a5346">渲染</text>
         <text class="dm" x="478" y="158">renderToolUseMessage / renderToolResultMessage</text>
         <text class="dm" x="478" y="174">renderGroupedToolUse</text>

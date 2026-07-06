@@ -164,9 +164,9 @@
     background: var(--ink3);
     transition: background 0.15s;
   }
-  .nav-section:hover { color: var(--accent); }
+  .nav-section:hover { color: var(--accent); background: rgba(109,69,201,0.05); border-radius: 6px; }
   .nav-section:hover::before { background: var(--accent); }
-  .nav-section.active { color: var(--accent); font-weight: 500; }
+  .nav-section.active { color: var(--accent); font-weight: 600; background: rgba(109,69,201,0.09); border-radius: 6px; }
   .nav-section.active::before { background: var(--accent); }
 
   .nav-divider {
@@ -806,10 +806,11 @@
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showPage('ch3')">3.1 Tool 接口定义</a>
-        <a class="nav-section" onclick="showPage('ch3')">3.2 工具注册表</a>
-        <a class="nav-section" onclick="showPage('ch3')">3.3 读并发与写独占调度</a>
-        <a class="nav-section" onclick="showPage('ch3')">3.4 MCP 工具统一接入</a>
+        <a class="nav-section" onclick="showSection('ch3','s3-1')">3.1 Tool 接口与契约</a>
+        <a class="nav-section" onclick="showSection('ch3','s3-2')">3.2 buildTool 工厂</a>
+        <a class="nav-section" onclick="showSection('ch3','s3-3')">3.3 读并发与写独占调度</a>
+        <a class="nav-section" onclick="showSection('ch3','s3-4')">3.4 MCP 工具统一接入</a>
+        <a class="nav-section" onclick="showSection('ch3','s3-5')">3.5 ToolSearch 懒加载</a>
       </div>
     </div>
 
@@ -2732,14 +2733,740 @@ return { reason: 'prompt_too_long' }</code></pre>
 <p class="chapter-subtitle">
   实现目标：Agent 能调 Bash、读写文件等多种工具，且读操作并发、写操作串行，互不干扰。
 </p>
-<h2>3.1 Tool 接口定义</h2>
-<p>（内容待填）</p>
-<h2>3.2 工具注册表</h2>
-<p>（内容待填）</p>
-<h2>3.3 读并发与写独占调度</h2>
-<p>（内容待填）</p>
-<h2>3.4 MCP 工具统一接入</h2>
-<p>（内容待填）</p>
+
+<h2>引言 · 为什么工具系统需要专门一章来讲</h2>
+
+<p>第一章讲 Agent Loop 时，工具调用被压缩成一行话："执行工具、拿到结果"。但这句话背后藏着这套架构里最复杂的工程决策之一。</p>
+
+<p>考虑这样一个场景：模型在同一轮里同时发出三个工具调用——<code>Read("src/query.ts")</code>、<code>Grep("isConcurrencySafe")</code>、<code>Edit("src/Tool.ts", ...)</code>。如果三个调用串行执行，慢；如果三个调用全部并发，Read 和 Grep 没问题，但 Edit 修改文件时，如果同时有另一个工具也在写同一个文件，结果就是损坏的文件。</p>
+
+<p>这就是工具系统必须解决的核心矛盾：<strong>最大化并发（速度）× 保证写操作的互斥（正确）</strong>。</p>
+
+<p>Claude Code 的解决方案不是一把大锁，而是通过工具接口上的两个谓词——<code>isConcurrencySafe</code> 和 <code>isReadOnly</code>——让每个工具在定义阶段就声明自己的调度属性，调度器据此在运行时把一组工具调用<strong>分批（partition）</strong>：连续的只读工具合并成一个并发批次，每个写工具单独占一个串行批次。读并发、写独占，两者不需要手动协调。</p>
+
+<div class="goal-card">
+  <div class="goal-card-label">本章目标</div>
+  <p>读完这章，你会理解：Tool 接口是什么、<code>buildTool</code> 为什么是必要的工厂抽象、调度器怎么用 <code>partitionToolCalls</code> 实现"批内并发、批间串行"、MCP 外部工具怎么适配进这套接口，以及 ToolSearch 如何解决"工具太多、首屏太慢"的加载问题。</p>
+</div>
+
+<p>本章的分析路径：先从接口定义（3.1）入手，理解一个 Tool 必须承诺什么；再看工具注册表（3.2），理解运行时是如何把所有工具组装在一起的；然后是调度器（3.3），这是本章最关键的工程核心；最后是 MCP 接入（3.4）和 ToolSearch 懒加载（3.5）两个拓展机制。</p>
+
+<h2 id="s3-1">3.1 Tool 接口——每把手的完整契约</h2>
+
+<p>在 Claude Code 里，一个"工具"不是一个函数，而是一个<strong>实现了 <code>Tool&lt;Input, Output, P&gt;</code> 接口的对象</strong>（<code>Tool.ts:281</code>）。这个接口足足有 40+ 个成员——乍看吓人，但如果按职责归类，每个字段就各就其位了：</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">接口解剖</span>
+    <span class="figure-title">Tool 接口的六个职责域 <span class="hint">— 悬停某域查看代表字段</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 320" role="img" aria-label="Tool 接口职责分域图">
+    <style>
+      .f3-1 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f3-1 .dt{font-size:13px;font-weight:700}
+      .f3-1 .dm{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;fill:#6e6353}
+      .f3-1 .dsub{font-size:11.5px;fill:#5a5346}
+      .f3-1 .fig-hoverable .hzone{opacity:0;transition:opacity .15s}
+      .f3-1 .fig-hoverable:hover .hzone{opacity:1}
+    </style>
+    <g class="f3-1">
+      <!-- Row 1 -->
+      <g class="fig-hoverable">
+        <rect x="14" y="16" width="210" height="84" rx="10" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+        <rect class="hzone" x="14" y="16" width="210" height="84" rx="10" fill="#2563EB" opacity=".07"/>
+        <text class="dt" x="30" y="40" fill="#2563EB">身份</text>
+        <text class="dm" x="30" y="58">name · aliases</text>
+        <text class="dsub" x="30" y="76">工具的唯一名称 + 兼容旧名</text>
+        <text class="dm" x="30" y="92">searchHint · isMcp · isLsp</text>
+      </g>
+      <g class="fig-hoverable">
+        <rect x="238" y="16" width="210" height="84" rx="10" fill="#F1ECFB" stroke="#6D45C9" stroke-opacity=".5"/>
+        <rect class="hzone" x="238" y="16" width="210" height="84" rx="10" fill="#6D45C9" opacity=".07"/>
+        <text class="dt" x="254" y="40" fill="#6D45C9">模式约定</text>
+        <text class="dm" x="254" y="58">inputSchema · outputSchema</text>
+        <text class="dsub" x="254" y="76">Zod Schema 或 JSON Schema</text>
+        <text class="dm" x="254" y="92">inputJSONSchema（MCP 专用）</text>
+      </g>
+      <g class="fig-hoverable">
+        <rect x="462" y="16" width="244" height="84" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+        <rect class="hzone" x="462" y="16" width="244" height="84" rx="10" fill="#1F8F5F" opacity=".07"/>
+        <text class="dt" x="478" y="40" fill="#1F8F5F">执行</text>
+        <text class="dm" x="478" y="58">call(args, ctx, canUse, msg, onProgress)</text>
+        <text class="dsub" x="478" y="76">工具的实际逻辑</text>
+        <text class="dm" x="478" y="92">maxResultSizeChars（结果截断阈值）</text>
+      </g>
+      <!-- Row 2 -->
+      <g class="fig-hoverable">
+        <rect x="14" y="116" width="210" height="84" rx="10" fill="#FBF1E6" stroke="#C77D2B" stroke-opacity=".5"/>
+        <rect class="hzone" x="14" y="116" width="210" height="84" rx="10" fill="#C77D2B" opacity=".07"/>
+        <text class="dt" x="30" y="140" fill="#C77D2B">调度属性</text>
+        <text class="dm" x="30" y="158">isConcurrencySafe(input)</text>
+        <text class="dm" x="30" y="174">isReadOnly(input)</text>
+        <text class="dsub" x="30" y="192">决定并发 or 串行（3.3 节）</text>
+      </g>
+      <g class="fig-hoverable">
+        <rect x="238" y="116" width="210" height="84" rx="10" fill="#FBEEE9" stroke="#C8344E" stroke-opacity=".5"/>
+        <rect class="hzone" x="238" y="116" width="210" height="84" rx="10" fill="#C8344E" opacity=".07"/>
+        <text class="dt" x="254" y="140" fill="#C8344E">权限</text>
+        <text class="dm" x="254" y="158">validateInput(input, ctx)</text>
+        <text class="dm" x="254" y="174">checkPermissions(input, ctx)</text>
+        <text class="dsub" x="254" y="192">前门守卫（3.1 末尾展开）</text>
+      </g>
+      <g class="fig-hoverable">
+        <rect x="462" y="116" width="244" height="84" rx="10" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".5"/>
+        <rect class="hzone" x="462" y="116" width="244" height="84" rx="10" fill="#9a8f7b" opacity=".07"/>
+        <text class="dt" x="478" y="140" fill="#5a5346">渲染</text>
+        <text class="dm" x="478" y="158">renderToolUseMessage / renderToolResultMessage</text>
+        <text class="dm" x="478" y="174">renderGroupedToolUse</text>
+        <text class="dsub" x="478" y="192">UI 呈现（CLI / Web 双端）</text>
+      </g>
+      <!-- Center label -->
+      <text x="360" y="228" text-anchor="middle" font-family="'Inter',system-ui,sans-serif" font-size="13" font-weight="600" fill="#3a3326">Tool&lt;Input, Output, P&gt;</text>
+      <text x="360" y="248" text-anchor="middle" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="10.5" fill="#9a8f7b">src/Tool.ts:281</text>
+      <line x1="14" y1="212" x2="706" y2="212" stroke="#e5e5e0" stroke-width="1"/>
+
+      <!-- Row 3: description + prompt -->
+      <rect x="14" y="258" width="335" height="48" rx="10" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".3"/>
+      <text font-family="'JetBrains Mono',ui-monospace,monospace" font-size="10.5" fill="#6e6353" x="30" y="278">description(input, opts)</text>
+      <text font-family="'Inter',system-ui,sans-serif" font-size="11" fill="#5a5346" x="30" y="296">运行时生成的单行描述（给模型看）</text>
+      <rect x="363" y="258" width="343" height="48" rx="10" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".3"/>
+      <text font-family="'JetBrains Mono',ui-monospace,monospace" font-size="10.5" fill="#6e6353" x="379" y="278">prompt(opts)</text>
+      <text font-family="'Inter',system-ui,sans-serif" font-size="11" fill="#5a5346" x="379" y="296">注入 System Prompt 的详细说明（给模型看）</text>
+    </g>
+  </svg>
+  <div class="figure-cap">Tool 接口的 40+ 个成员可归入六域：身份、模式约定、执行、调度属性、权限、渲染。其中"调度属性"和"权限"是 Claude Code 架构最独特的两处设计。</div>
+</div>
+
+<p>对照这张图，先抓最关键的几个成员：</p>
+
+<pre><code class="language-typescript">// Tool.ts:281 — 精简版，只保留本章必须理解的字段
+type Tool&lt;Input, Output, P&gt; = {
+  name: string                          // 唯一标识，模型靠这个名字发起调用
+
+  inputSchema: Input                    // Zod schema，双重用途：
+                                        //   1. 校验模型传来的参数
+                                        //   2. 生成发给模型的 JSON Schema 描述
+
+  call(                                 // 工具主逻辑
+    args: z.infer&lt;Input&gt;,
+    context: ToolUseContext,
+    canUseTool: CanUseToolFn,
+    parentMessage: AssistantMessage,
+    onProgress?: ToolCallProgress&lt;P&gt;
+  ): Promise&lt;ToolResult&lt;Output&gt;&gt;
+
+  isConcurrencySafe(input: z.infer&lt;Input&gt;): boolean  // 调度关键：是否可与其他工具并发
+  isReadOnly(input: z.infer&lt;Input&gt;): boolean          // 是否只读（影响权限预检）
+  isDestructive?(input: z.infer&lt;Input&gt;): boolean      // 是否不可逆（删除 / 覆盖）
+
+  validateInput?(input, ctx): Promise&lt;ValidationResult&gt;   // 前置校验（语义层）
+  checkPermissions(input, ctx): Promise&lt;PermissionResult&gt;  // 权限检查
+
+  maxResultSizeChars: number            // 结果超过此值则落盘，模型收到路径 + 预览
+  mapToolResultToToolResultBlockParam(  // 把 Output 序列化成 API 要求的格式
+    content: Output, toolUseID: string
+  ): ToolResultBlockParam
+}</code></pre>
+
+<p>两个地方值得在这里多解释：</p>
+
+<p><strong><code>inputSchema</code> 的双重用途。</strong> Zod schema 不只是运行时校验，它还是文档。Claude Code 在组装 System Prompt 时，会把每个工具的 <code>inputSchema</code> 自动序列化成 JSON Schema 格式，作为"这个工具怎么用、有哪些参数"的说明发给模型。这意味着：你定义 schema 的用词和结构，直接影响模型会不会正确调用这个工具。字段名取对了、描述写清楚了，就是在给模型写说明书。</p>
+
+<p><strong><code>maxResultSizeChars</code> 的设计意图。</strong> 工具结果可能很大——一个 <code>Bash("find . -name '*.ts'")</code> 可能返回几十 KB 的路径列表。把这么大的结果直接塞进消息数组，一轮就能把 token 耗尽。<code>maxResultSizeChars</code> 设了一道闸：结果超限时，内容落盘存文件，消息里只剩路径 + 前几行预览（<code>toolResultStorage.ts</code>）。注意 <code>FileReadTool</code> 把这个值设为 <code>Infinity</code>（<code>FileReadTool.ts:342</code>）——原因是 FileRead 的输出本身就是文件内容，再存一份等于创造循环依赖（存进去的路径被模型再 Read，又存进去……）。</p>
+
+<h3>3.1.1 权限流水线：validateInput → checkPermissions → call</h3>
+
+<p>每次工具调用在进入 <code>call()</code> 之前，必须过两道关（<code>toolExecution.ts:683</code>）：</p>
+
+<pre><code class="language-typescript">// toolExecution.ts（简化）
+async function checkPermissionsAndCallTool(tool, input, ctx, ...) {
+  // ── 第一道：语义校验（input 层）
+  const isValid = await tool.validateInput?.(parsedInput, ctx)
+  if (isValid?.result === false) {
+    return [errorResult(isValid.message)]   // 直接拒绝，不走权限
+  }
+
+  // ── 第二道：权限决策（canUseTool / hooks / 用户确认）
+  const permissionDecision = await canUseTool(tool, parsedInput, ctx)
+  if (permissionDecision.behavior !== 'allow') {
+    return [deniedResult()]
+  }
+
+  // ── 第三步：执行
+  const result = await tool.call(parsedInput, ctx, canUseTool, msg, onProgress)
+  return [resultMessage(result)]
+}</code></pre>
+
+<p><code>validateInput</code> 负责语义层面的前置检查——例如"文件路径不能是绝对路径"、"Bash 命令不能包含危险的 <code>rm -rf /</code>"这类业务规则，它与权限无关，失败直接返回错误不弹权限框。<code>checkPermissions</code> 则是工具级别的自定义权限逻辑（全局权限框架在第七章），例如 MCP 工具在这里统一返回 <code>passthrough</code> 让上层权限系统接管。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>把"参数对不对"（validateInput）和"能不能做"（checkPermissions）分成两个关卡，是个很值得学习的分层习惯。前者是无副作用的纯校验，可以在任何时机调用；后者涉及用户交互和上下文状态，调用有代价。把两者混在一起会导致"弹了权限框才发现参数本来就错了"的体验问题。</p>
+</div>
+
+<h2 id="s3-2">3.2 buildTool——消灭样板的工厂</h2>
+
+<p>你不会直接手写一个实现了 40+ 成员的 <code>Tool</code> 对象。Claude Code 提供了 <code>buildTool(def)</code> 工厂函数（<code>Tool.ts:783</code>），它接受一个"可省略部分成员"的 <code>ToolDef</code>，自动填入合理的默认值，返回一个完整的 <code>Tool</code>：</p>
+
+<pre><code class="language-typescript">// Tool.ts:757 — 默认值定义
+const TOOL_DEFAULTS = {
+  isEnabled:          () => true,
+  isConcurrencySafe:  () => false,   // ← 默认不安全（fail-closed）
+  isReadOnly:         () => false,   // ← 默认写操作（fail-closed）
+  isDestructive:      () => false,
+  checkPermissions:   () => Promise.resolve({ behavior: 'allow', updatedInput }),
+  toAutoClassifierInput: () => '',   // ← 默认不参与安全分类器
+  userFacingName:     () => name,
+}
+
+// Tool.ts:783
+export function buildTool&lt;D extends AnyToolDef&gt;(def: D): BuiltTool&lt;D&gt; {
+  return {
+    ...TOOL_DEFAULTS,
+    userFacingName: () => def.name,
+    ...def,                          // def 的字段覆盖默认值
+  } as BuiltTool&lt;D&gt;
+}</code></pre>
+
+<p>注意默认值的方向：<code>isConcurrencySafe</code> 和 <code>isReadOnly</code> 都默认 <code>false</code>——<strong>fail-closed（失效即关闭）</strong>。一个工具如果没有显式声明"我是安全的"，就被当作写操作、串行执行。这是防御式设计：宁可损失一些并发速度，也不要因为漏标导致数据损坏。</p>
+
+<p>对比三个典型工具的声明：</p>
+
+<pre><code class="language-typescript">// FileReadTool.ts:373
+isConcurrencySafe() { return true  },  // 只读，可与任意工具并发
+isReadOnly()        { return true  },
+
+// FileEditTool.ts — 未声明，走默认值
+// isConcurrencySafe → false（不可并发）
+// isReadOnly        → false（写操作）
+
+// BashTool.tsx — 动态判断
+isConcurrencySafe(input) {
+  return this.isReadOnly?.(input) ?? false
+},
+isReadOnly(input) {
+  const hasCd = commandHasAnyCd(input.command)
+  const result = checkReadOnlyConstraints(input, hasCd)
+  return result.behavior === 'allow'   // 静态分析命令内容
+}</code></pre>
+
+<p>BashTool 的处理最有意思：它不是静态地声明"总是可以"或"总是不行"，而是在运行时<strong>解析命令内容</strong>来动态决定。<code>ls</code>、<code>cat</code>、<code>grep</code> 这类命令静态分析为只读，就能享受并发；<code>touch</code>、<code>rm</code>、任何包含 <code>cd</code> 的命令则被保守地判定为写操作，必须串行。</p>
+
+<div class="concept">
+  <div class="concept-label">概念 · Fail-Closed（失效即关闭）</div>
+  <p><span class="term">Fail-Closed</span> 是一种安全设计原则：当系统无法判断某个操作是否安全时，<strong>默认拒绝</strong>（而不是默认允许）。与之对立的是 Fail-Open，即"不确定就放行"。</p>
+  <p>在工具调度里，选择 fail-closed 意味着：一个新工具如果忘记声明 <code>isConcurrencySafe</code>，不会意外地与其他工具并发、造成状态损坏；代价是可能错失一些并发机会。这个代价远小于静默的数据破坏，所以是正确的权衡。</p>
+</div>
+
+<h2 id="s3-3">3.3 读并发与写独占——调度器的核心</h2>
+
+<p>现在来看本章最关键的工程核心：调度器是如何把一组工具调用编排成"读并发、写串行"的执行计划的。</p>
+
+<p>整个调度逻辑在 <code>toolOrchestration.ts</code> 里，由三个函数组成：<code>runTools</code>（主入口）、<code>partitionToolCalls</code>（分批器）、<code>runToolsConcurrently</code> 和 <code>runToolsSerially</code>（执行器）。</p>
+
+<h3>3.3.1 partitionToolCalls：分批</h3>
+
+<p>分批算法是一个贪心分组（<code>toolOrchestration.ts:84</code>）：从左往右扫描工具调用列表，把相邻的"并发安全"工具合并进同一个批次，只要遇到一个"不安全"的工具就新开一个批次：</p>
+
+<pre><code class="language-typescript">// toolOrchestration.ts:84
+function partitionToolCalls(
+  toolUseMessages: ToolUseBlock[],
+  toolUseContext: ToolUseContext,
+): Batch[] {
+  return toolUseMessages.reduce((acc: Batch[], toolUse) => {
+    const tool = findToolByName(toolUseContext.options.tools, toolUse.name)
+    const parsedInput = tool?.inputSchema.safeParse(toolUse.input)
+    const isConcurrencySafe = parsedInput?.success
+      ? (() => {
+          try { return Boolean(tool?.isConcurrencySafe(parsedInput.data)) }
+          catch { return false }   // ← 解析失败也 fail-closed
+        })()
+      : false
+
+    // 连续的"安全"工具合并进同一批次
+    if (isConcurrencySafe && acc[acc.length - 1]?.isConcurrencySafe) {
+      acc[acc.length - 1]!.blocks.push(toolUse)
+    } else {
+      acc.push({ isConcurrencySafe, blocks: [toolUse] })
+    }
+    return acc
+  }, [])
+}</code></pre>
+
+<p>这个算法最重要的特性：<strong>它保持顺序，不做全局重排。</strong>如果模型发出了 [Read, Read, Edit, Read]，分批结果是 [{Read, Read}, {Edit}, {Read}]，而不是 [{Read, Read, Read}, {Edit}]。为什么不做全局优化？因为模型发出工具调用的顺序本身可能有语义——Edit 之前的两次 Read 是为了读取它要修改的内容，Edit 之后的 Read 是验证修改结果。打乱顺序会破坏这个语义。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">分批示意</span>
+    <span class="figure-title">partitionToolCalls 贪心分组 <span class="hint">— 顺序保持，不做全局重排</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 280" role="img" aria-label="工具调用分批示意图">
+    <style>
+      .f3-2 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f3-2 .toolt{font-size:12px;font-weight:700}
+      .f3-2 .blab{font-size:11px;fill:#5a5346}
+      .f3-2 .mlab{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px}
+      .f3-2 .arr{stroke:#c3bcae;stroke-width:1.5;fill:none}
+    </style>
+    <defs><marker id="f32a" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#c3bcae"/></marker></defs>
+    <g class="f3-2">
+      <!-- Title row: tool calls from model -->
+      <text x="360" y="30" text-anchor="middle" font-size="12" font-weight="600" fill="#3a3326">模型发出的 5 个工具调用（同一轮）</text>
+
+      <!-- Tool call chips -->
+      <rect x="14" y="44" width="108" height="44" rx="9" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".7"/>
+      <text class="toolt" x="68" y="64" text-anchor="middle" fill="#2563EB">Read</text>
+      <text class="mlab" x="68" y="80" text-anchor="middle" fill="#6e6353">✓ 并发安全</text>
+
+      <rect x="132" y="44" width="108" height="44" rx="9" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".7"/>
+      <text class="toolt" x="186" y="64" text-anchor="middle" fill="#2563EB">Grep</text>
+      <text class="mlab" x="186" y="80" text-anchor="middle" fill="#6e6353">✓ 并发安全</text>
+
+      <rect x="250" y="44" width="108" height="44" rx="9" fill="#FBEEE9" stroke="#C8344E" stroke-opacity=".7"/>
+      <text class="toolt" x="304" y="64" text-anchor="middle" fill="#C8344E">Edit</text>
+      <text class="mlab" x="304" y="80" text-anchor="middle" fill="#9a8f7b">✗ 写操作</text>
+
+      <rect x="368" y="44" width="108" height="44" rx="9" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".7"/>
+      <text class="toolt" x="422" y="64" text-anchor="middle" fill="#2563EB">Read</text>
+      <text class="mlab" x="422" y="80" text-anchor="middle" fill="#6e6353">✓ 并发安全</text>
+
+      <rect x="486" y="44" width="108" height="44" rx="9" fill="#FBEEE9" stroke="#C8344E" stroke-opacity=".7"/>
+      <text class="toolt" x="540" y="64" text-anchor="middle" fill="#C8344E">Bash(echo)</text>
+      <text class="mlab" x="540" y="80" text-anchor="middle" fill="#6e6353">✓ 并发安全</text>
+
+      <!-- Arrow -->
+      <path class="arr" d="M360,104 L360,124" marker-end="url(#f32a)"/>
+      <text x="380" y="118" font-size="11.5" fill="#9a8f7b">partitionToolCalls()</text>
+
+      <!-- Batches -->
+      <text x="360" y="152" text-anchor="middle" font-size="12" font-weight="600" fill="#3a3326">分批结果：3 个批次，顺序不变</text>
+
+      <!-- Batch 1 -->
+      <rect x="14" y="164" width="230" height="60" rx="10" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".6" stroke-dasharray="4 3"/>
+      <text class="blab" x="22" y="180" fill="#2563EB">批次 1 · isConcurrencySafe=true</text>
+      <rect x="24" y="186" width="96" height="30" rx="7" fill="#2563EB" opacity=".8"/>
+      <text class="mlab" x="72" y="205" text-anchor="middle" fill="#fff">Read</text>
+      <rect x="128" y="186" width="96" height="30" rx="7" fill="#2563EB" opacity=".8"/>
+      <text class="mlab" x="176" y="205" text-anchor="middle" fill="#fff">Grep</text>
+
+      <!-- Batch 2 -->
+      <rect x="258" y="164" width="122" height="60" rx="10" fill="#FBEEE9" stroke="#C8344E" stroke-opacity=".6" stroke-dasharray="4 3"/>
+      <text class="blab" x="266" y="180" fill="#C8344E">批次 2 · 串行</text>
+      <rect x="268" y="186" width="96" height="30" rx="7" fill="#C8344E" opacity=".8"/>
+      <text class="mlab" x="316" y="205" text-anchor="middle" fill="#fff">Edit</text>
+
+      <!-- Batch 3 -->
+      <rect x="394" y="164" width="230" height="60" rx="10" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".6" stroke-dasharray="4 3"/>
+      <text class="blab" x="402" y="180" fill="#2563EB">批次 3 · isConcurrencySafe=true</text>
+      <rect x="404" y="186" width="96" height="30" rx="7" fill="#2563EB" opacity=".8"/>
+      <text class="mlab" x="452" y="205" text-anchor="middle" fill="#fff">Read</text>
+      <rect x="508" y="186" width="96" height="30" rx="7" fill="#2563EB" opacity=".8"/>
+      <text class="mlab" x="556" y="205" text-anchor="middle" fill="#fff">Bash(echo)</text>
+
+      <!-- Timeline labels -->
+      <text x="360" y="252" text-anchor="middle" font-size="11" fill="#9a8f7b">执行顺序：批次1并发 → 批次2串行 → 批次3并发　　壁钟时间 ≈ max(批次1) + 批次2 + max(批次3)</text>
+      <text x="360" y="270" text-anchor="middle" font-size="11" fill="#b7ad9c">注意：Read 后移位置不变——顺序保持，确保 Edit 前已读完所需内容</text>
+    </g>
+  </svg>
+  <div class="figure-cap">partitionToolCalls 是保序的贪心分组：同向相邻的"并发安全"工具合并成一批，遇到写操作立刻新开批次。批次间严格串行，批次内并发。</div>
+</div>
+
+<h3>3.3.2 runTools：批次执行</h3>
+
+<p><code>runTools</code> 是调度器的主入口，它遍历分批结果，对每个批次选择对应的执行策略（<code>toolOrchestration.ts:23</code>）：</p>
+
+<pre><code class="language-typescript">// toolOrchestration.ts:23
+export async function* runTools(...): AsyncGenerator&lt;MessageUpdate&gt; {
+  let currentContext = toolUseContext
+
+  for (const { isConcurrencySafe, blocks } of partitionToolCalls(...)) {
+    if (isConcurrencySafe) {
+      // ── 并发批次：所有工具同时启动，结果按到达顺序 yield
+      const queuedContextModifiers: Record&lt;string, ...&gt; = {}
+      for await (const update of runToolsConcurrently(blocks, ...)) {
+        if (update.contextModifier) {
+          queuedContextModifiers[update.toolUseID].push(update.modifyContext)
+        }
+        yield { message: update.message, newContext: currentContext }
+      }
+      // 并发批次结束后，统一应用 contextModifier
+      for (const block of blocks) {
+        for (const modifier of queuedContextModifiers[block.id] ?? []) {
+          currentContext = modifier(currentContext)
+        }
+      }
+    } else {
+      // ── 串行批次：逐个执行，实时更新 context
+      for await (const update of runToolsSerially(blocks, ...)) {
+        if (update.newContext) currentContext = update.newContext
+        yield { message: update.message, newContext: currentContext }
+      }
+    }
+  }
+}</code></pre>
+
+<p>这里有一个微妙的细节：<code>contextModifier</code>。有些工具执行完之后，需要修改运行时上下文（<code>ToolUseContext</code>）——例如 FileEditTool 写完文件后，需要更新内部的文件状态缓存。对串行工具，这很简单：执行完立刻应用修改，下一个工具拿到的 <code>context</code> 已经是更新过的。</p>
+
+<p>对并发工具，问题来了：多个工具同时在跑，如果每个工具都实时修改 <code>context</code>，就出现了经典的竞争条件（race condition）。Claude Code 的解法是<strong>延迟应用</strong>：并发批次内的所有 <code>contextModifier</code> 先收集起来，等整批工具都完成后再依次应用。这是并发工具"只读安全"这个假设在代码层面的体现——并发工具不得修改共享状态，修改动作统一推迟到批次结束后串行执行。</p>
+
+<h3>3.3.3 并发引擎：all() 函数</h3>
+
+<p>并发执行的核心是 <code>utils/generators.ts</code> 里的 <code>all()</code> 函数，它把多个异步 Generator 并发跑起来，限制同时活跃的数量，按到达顺序 yield 结果（<code>generators.ts:32</code>）：</p>
+
+<pre><code class="language-typescript">// generators.ts:32
+export async function* all&lt;A&gt;(
+  generators: AsyncGenerator&lt;A, void&gt;[],
+  concurrencyCap = Infinity,
+): AsyncGenerator&lt;A, void&gt; {
+  const waiting = [...generators]
+  const promises = new Set&lt;Promise&lt;...&gt;&gt;()
+
+  // 启动初始批次（受 cap 限制）
+  while (promises.size &lt; concurrencyCap && waiting.length > 0) {
+    promises.add(next(waiting.shift()!))
+  }
+
+  while (promises.size > 0) {
+    // 谁先返回就先 yield，不等慢的那个
+    const { done, value, generator } = await Promise.race(promises)
+    if (!done) {
+      promises.add(next(generator))
+      if (value !== undefined) yield value
+    } else if (waiting.length > 0) {
+      // 一个 generator 跑完，从等待队列里补充一个
+      promises.add(next(waiting.shift()!))
+    }
+  }
+}</code></pre>
+
+<p>并发上限由环境变量 <code>CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY</code> 控制，默认值 <code>10</code>（<code>toolOrchestration.ts:11</code>）。这个值不是随意选的：文件读操作是 I/O 密集型，10 并发能让磁盘 I/O 充分饱和，同时避免文件描述符耗尽。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">时序图 · 动态</span>
+    <span class="figure-title">批次1并发 + 批次2串行 的时间线对比 <span class="hint">— 小球表示正在执行的工具</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 210" role="img" aria-label="并发与串行时间线对比">
+    <style>
+      .f3-3 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f3-3 .tl{font-size:11.5px;font-weight:600}
+      .f3-3 .ts{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;fill:#9a8f7b}
+    </style>
+    <g class="f3-3">
+      <!-- Y axis labels -->
+      <text class="tl" x="4" y="52" fill="#2563EB">Read</text>
+      <text class="tl" x="4" y="82" fill="#2563EB">Grep</text>
+      <text class="ts" x="4" y="102" fill="#9a8f7b">批次1</text>
+      <line x1="80" y1="20" x2="80" y2="200" stroke="#e5e5e0" stroke-width="1"/>
+      <text x="86" y="16" class="ts" fill="#3a3326">0ms</text>
+
+      <!-- Batch 1: concurrent -->
+      <!-- Read: 0 - 120ms -->
+      <rect x="80" y="36" width="145" height="24" rx="5" fill="#2563EB" opacity=".75"/>
+      <text x="153" y="52" text-anchor="middle" font-size="11" fill="#fff">120ms</text>
+
+      <!-- Grep: 0 - 80ms -->
+      <rect x="80" y="66" width="97" height="24" rx="5" fill="#2563EB" opacity=".75"/>
+      <text x="129" y="82" text-anchor="middle" font-size="11" fill="#fff">80ms</text>
+
+      <!-- Batch 1 completes at 120ms -->
+      <line x1="225" y1="20" x2="225" y2="105" stroke="#2563EB" stroke-dasharray="3 3" stroke-opacity=".6"/>
+      <text x="232" y="16" class="ts" fill="#2563EB">120ms</text>
+      <text x="150" y="122" text-anchor="middle" font-size="11" fill="#2563EB">批次1 壁钟 = max(120, 80) = 120ms</text>
+
+      <!-- Batch 2: serial (Edit) -->
+      <text class="tl" x="4" y="152" fill="#C8344E">Edit</text>
+      <text class="ts" x="4" y="167" fill="#9a8f7b">批次2</text>
+      <rect x="225" y="136" width="120" height="24" rx="5" fill="#C8344E" opacity=".75"/>
+      <text x="285" y="152" text-anchor="middle" font-size="11" fill="#fff">100ms</text>
+
+      <line x1="345" y1="20" x2="345" y2="180" stroke="#C8344E" stroke-dasharray="3 3" stroke-opacity=".6"/>
+      <text x="352" y="16" class="ts" fill="#C8344E">220ms</text>
+
+      <!-- Total -->
+      <rect x="80" y="188" width="265" height="12" rx="3" fill="#d9d3c7" opacity=".5"/>
+      <rect x="80" y="188" width="145" height="12" rx="3" fill="#2563EB" opacity=".3"/>
+      <rect x="225" y="188" width="120" height="12" rx="3" fill="#C8344E" opacity=".3"/>
+      <text x="430" y="198" font-size="11" fill="#5a5346">总耗时 220ms（而非串行的 300ms）</text>
+
+      <!-- Legend -->
+      <rect x="480" y="36" width="14" height="14" rx="3" fill="#2563EB" opacity=".75"/>
+      <text x="500" y="48" font-size="11" fill="#3a3326">并发批次（读操作）</text>
+      <rect x="480" y="60" width="14" height="14" rx="3" fill="#C8344E" opacity=".75"/>
+      <text x="500" y="72" font-size="11" fill="#3a3326">串行批次（写操作）</text>
+      <text x="480" y="100" font-size="10.5" fill="#9a8f7b">并发节省：300 - 220 = 80ms</text>
+      <text x="480" y="116" font-size="10.5" fill="#9a8f7b">= Grep 的执行时间</text>
+    </g>
+  </svg>
+  <div class="figure-cap">并发批次的壁钟时间等于批次内最慢工具的耗时，而非各工具耗时之和。写操作串行不增加总时间，只是排队等待上一批并发完成。</div>
+</div>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>这套调度设计的精髓是"声明式并发"：工具不参与调度决策，只声明自己的属性（<code>isConcurrencySafe</code>），调度器根据这个声明自动生成最优执行计划。这比在工具内部手动控制锁和同步要安全得多——工具作者只需要诚实地声明，就能自动获得正确的并发行为。</p>
+  <p><span class="role">给产品经理</span>这套机制是"快而不乱"的技术基础。每轮工具调用里，Agent 能同时读多个文件、搜多个模式，但写操作始终有序进行，不会出现文件被交叉写坏的情况。这也解释了为什么 Claude Code 处理大型代码库时速度相对快——读操作是真的并发的。</p>
+</div>
+
+<h2 id="s3-4">3.4 MCP 工具统一接入</h2>
+
+<p>到目前为止我们讨论的都是"内置工具"——Bash、Read、Edit 这类随 Claude Code 发布的工具。但 Claude Code 还支持一类"外部工具"：通过 <strong>MCP（Model Context Protocol）</strong> 协议接入的第三方工具，比如数据库查询工具、Figma 设计工具、Slack 消息工具等。这些工具的代码不在 Claude Code 里，而是运行在外部进程中。</p>
+
+<div class="concept">
+  <div class="concept-label">概念 · MCP（Model Context Protocol）</div>
+  <p><span class="term">MCP（Model Context Protocol）</span>是 Anthropic 提出的开放协议，定义了 LLM 应用与外部工具 / 数据源之间的标准通信接口。MCP 服务端（Server）是一个独立进程，暴露工具定义和调用接口；MCP 客户端（Client）是嵌入在 LLM 应用里的连接器，负责发现工具、传递调用请求、接收结果。</p>
+  <p>MCP 的核心价值是<strong>标准化</strong>：任何人都可以按照协议实现一个 MCP Server，让任何支持 MCP 的 AI 应用立刻获得这个工具的能力，无需修改 AI 应用本身的代码。</p>
+</div>
+
+<p>MCP 工具在 Claude Code 内部的接入点是 <code>services/mcp/client.ts</code>。当一个 MCP Server 连接后，Claude Code 遍历它暴露的所有工具定义，把每个工具"改造"成一个符合 <code>Tool</code> 接口的本地对象（<code>client.ts:1768</code>）：</p>
+
+<pre><code class="language-typescript">// client.ts:1768 — MCP 工具适配层（精简）
+for (const tool of mcpTools) {
+  const fullyQualifiedName = buildMcpToolName(client.name, tool.name)
+  // mcp__server_name__tool_name
+
+  const mcpTool = {
+    ...MCPTool,                      // 继承 MCP 工具的基础实现
+    isMcp: true,
+    name: fullyQualifiedName,
+
+    // ① 从 MCP 协议的 annotations 映射到 isConcurrencySafe / isReadOnly
+    isConcurrencySafe() {
+      return tool.annotations?.readOnlyHint ?? false
+    },
+    isReadOnly() {
+      return tool.annotations?.readOnlyHint ?? false
+    },
+    isDestructive() {
+      return tool.annotations?.destructiveHint ?? false
+    },
+
+    // ② inputSchema 用 MCP Server 定义的 JSON Schema，而非 Zod
+    inputJSONSchema: tool.inputSchema as Tool['inputJSONSchema'],
+
+    // ③ 权限默认走"需要用户确认"流程（passthrough）
+    async checkPermissions() {
+      return { behavior: 'passthrough', ... }
+    },
+
+    // ④ 实际调用通过 MCP 客户端转发
+    async call(args) {
+      const result = await mcpClient.callTool({ name: tool.name, arguments: args })
+      return { data: formatMcpResult(result) }
+    },
+  }
+  tools.push(mcpTool)
+}</code></pre>
+
+<p>关键在第①步：MCP 工具通过 <code>annotations</code>（工具元数据）声明自己的属性，Claude Code 把这些声明<strong>自动翻译成本地调度属性</strong>。一个数据库查询工具在 MCP 定义里标注了 <code>readOnlyHint: true</code>，Claude Code 就自动把它放进并发批次；一个会写文件的工具标注了 <code>destructiveHint: true</code>，就串行执行并在权限层弹出额外警告。外部工具无缝融入了内置工具的调度体系，无需特殊处理。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">架构图</span>
+    <span class="figure-title">MCP 工具适配：从外部进程到 Tool 接口 <span class="hint">— 三层映射</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 200" role="img" aria-label="MCP 工具适配层示意图">
+    <style>
+      .f3-4 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f3-4 .lt{font-size:12.5px;font-weight:700}
+      .f3-4 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;fill:#6e6353}
+      .f3-4 .ld{font-size:11px;fill:#5a5346}
+      .f3-4 .pipe{stroke:#c3bcae;stroke-width:1.6;fill:none}
+    </style>
+    <defs>
+      <marker id="f34a" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#c3bcae"/></marker>
+    </defs>
+    <g class="f3-4">
+      <!-- MCP Server (external) -->
+      <rect x="14" y="30" width="170" height="140" rx="12" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".6" stroke-dasharray="5 4"/>
+      <text class="lt" x="99" y="56" text-anchor="middle" fill="#5a5346">MCP Server</text>
+      <text class="ld" x="99" y="74" text-anchor="middle" fill="#9a8f7b">外部进程（独立运行）</text>
+      <rect x="26" y="84" width="146" height="34" rx="8" fill="#fff" stroke="#9a8f7b" stroke-opacity=".5"/>
+      <text class="ls" x="99" y="100" text-anchor="middle">name, inputSchema</text>
+      <text class="ls" x="99" y="116" text-anchor="middle">annotations.readOnlyHint</text>
+      <rect x="26" y="126" width="146" height="34" rx="8" fill="#fff" stroke="#9a8f7b" stroke-opacity=".5"/>
+      <text class="ls" x="99" y="142" text-anchor="middle">tools/list</text>
+      <text class="ls" x="99" y="158" text-anchor="middle">tools/call</text>
+
+      <!-- Arrow: MCP → Adapter -->
+      <path class="pipe" d="M184,100 L234,100" marker-end="url(#f34a)"/>
+      <text x="209" y="92" text-anchor="middle" font-size="10" fill="#9a8f7b">MCP SDK</text>
+
+      <!-- Adapter -->
+      <rect x="234" y="30" width="200" height="140" rx="12" fill="#F1ECFB" stroke="#6D45C9" stroke-opacity=".5"/>
+      <text class="lt" x="334" y="56" text-anchor="middle" fill="#6D45C9">适配层 · client.ts</text>
+      <text class="ld" x="334" y="74" text-anchor="middle" fill="#9a8f7b">mcp__server__tool</text>
+      <rect x="246" y="84" width="176" height="34" rx="8" fill="#fff" stroke="#6D45C9" stroke-opacity=".4"/>
+      <text class="ls" x="334" y="100" text-anchor="middle">readOnlyHint → isConcurrencySafe</text>
+      <text class="ls" x="334" y="116" text-anchor="middle">destructiveHint → isDestructive</text>
+      <rect x="246" y="126" width="176" height="34" rx="8" fill="#fff" stroke="#6D45C9" stroke-opacity=".4"/>
+      <text class="ls" x="334" y="142" text-anchor="middle">inputJSONSchema（直接映射）</text>
+      <text class="ls" x="334" y="158" text-anchor="middle">call() → mcpClient.callTool()</text>
+
+      <!-- Arrow: Adapter → Tool -->
+      <path class="pipe" d="M434,100 L486,100" marker-end="url(#f34a)"/>
+      <text x="460" y="92" text-anchor="middle" font-size="10" fill="#9a8f7b">符合 Tool 接口</text>
+
+      <!-- Tool / Scheduler -->
+      <rect x="486" y="30" width="220" height="140" rx="12" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="lt" x="596" y="56" text-anchor="middle" fill="#1F8F5F">调度器视角</text>
+      <text class="ld" x="596" y="74" text-anchor="middle" fill="#9a8f7b">与内置工具完全一致</text>
+      <rect x="498" y="84" width="196" height="34" rx="8" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ls" x="596" y="100" text-anchor="middle">partitionToolCalls 自动分批</text>
+      <text class="ls" x="596" y="116" text-anchor="middle">read → 并发，write → 串行</text>
+      <rect x="498" y="126" width="196" height="34" rx="8" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ls" x="596" y="142" text-anchor="middle">runToolsConcurrently / Serially</text>
+      <text class="ls" x="596" y="158" text-anchor="middle">统一权限流 · 统一结果处理</text>
+    </g>
+  </svg>
+  <div class="figure-cap">MCP 工具通过适配层变成标准 Tool 对象。调度器看不出内置工具和 MCP 工具的差别，两者遵循同一套并发规则。</div>
+</div>
+
+<h2 id="s3-5">3.5 ToolSearch——工具的懒加载</h2>
+
+<p>随着 MCP 生态的发展，一个重型 Claude Code 实例可能挂载几十个 MCP Server，每个 Server 暴露数十个工具。把所有工具的完整 Schema 全部写进 System Prompt，一个 Prompt 就要消耗数万 token——既慢又贵，而且大多数工具在当次任务里根本用不到。</p>
+
+<p>这是一个经典的"按需加载"问题，Claude Code 的解法叫 <strong>ToolSearch</strong>。</p>
+
+<div class="concept">
+  <div class="concept-label">概念 · ToolSearch（工具懒加载）</div>
+  <p>ToolSearch 是一种<span class="term">延迟加载（lazy loading）</span>机制：默认只在 System Prompt 里列出工具的名字（"告知存在"），不发完整 Schema；模型通过调用 <code>ToolSearch</code> 工具，用关键词查询、加载某个工具的完整 Schema，然后才能调用它。</p>
+  <p>这与浏览器里的代码分割（code splitting）思路完全相同：先加载框架和首屏代码，剩余功能等到真正需要时才动态拉取。</p>
+</div>
+
+<p>一个工具是否"被延迟加载"由两个条件决定（<code>toolSearch.ts:isDeferredTool</code>）：</p>
+
+<pre><code class="language-typescript">// toolSearch.ts
+export function isDeferredTool(tool: Tool): boolean {
+  if (tool.alwaysLoad === true) return false   // 明确要求首屏加载
+
+  if (tool.isMcp === true) return true          // MCP 工具一律延迟
+
+  if (tool.name === TOOL_SEARCH_TOOL_NAME) return false  // ToolSearch 自己不能被延迟
+
+  return tool.shouldDefer === true              // 内置工具显式标记可延迟
+}</code></pre>
+
+<p>当 ToolSearch 模式开启时，System Prompt 里看起来是这样的：</p>
+
+<pre><code class="language-text"># System Prompt（精简示意）
+可用工具（立即可用，完整 schema 已附）：
+  Bash, Read, Edit, Write, Grep, Glob, Agent, ToolSearch ...
+
+&lt;system-reminder&gt;
+  deferred tools（需先调 ToolSearch 加载 schema）：
+  mcp__figma__get_design_context
+  mcp__figma__generate_figma_design
+  mcp__linear__authenticate
+  mcp__slack__send_message
+  ... （仅名字，无参数描述）
+&lt;/system-reminder&gt;</code></pre>
+
+<p>当模型想用 Figma 工具时，先调用 ToolSearch：</p>
+
+<pre><code class="language-json">// 模型发出的工具调用
+{
+  "type": "tool_use",
+  "name": "ToolSearch",
+  "input": {
+    "query": "select:mcp__figma__get_design_context"
+  }
+}
+
+// ToolSearch 返回（函数签名变得可调用）
+{
+  "type": "tool_result",
+  "content": "&lt;functions&gt;
+    &lt;function&gt;{\"name\": \"mcp__figma__get_design_context\",
+               \"description\": \"...\",
+               \"parameters\": {...complete schema...}}&lt;/function&gt;
+  &lt;/functions&gt;"
+}</code></pre>
+
+<p>拿到完整 Schema 后，模型就可以在下一步调用 <code>mcp__figma__get_design_context</code> 了。这个"ToolSearch → 实际工具调用"的两步流程，带来了约 40% 的首屏 token 节省，代价是多一轮往返（当命中缓存时几乎可以忽略，因为结果可以在模型的上下文中重用）。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>ToolSearch 的设计解决了一个普遍问题：随着功能增长，初始上下文会越来越臃肿。解决办法不是限制功能的数量，而是把"声明存在"和"提供完整描述"分成两个阶段。你设计任何大型 Prompt 系统时，都可以参考这个思路——让 LLM 先知道"有哪些能力"，再按需拉取"每个能力的完整用法"。</p>
+  <p><span class="role">给产品经理</span>ToolSearch 使得"Claude Code 能接入多少个 MCP 工具"在理论上变成了无上限——因为工具数量的增加对首屏成本的影响从线性变成了常数（每个延迟工具只贡献一行名字）。这也是 MCP 生态能规模化的基础能力之一。</p>
+</div>
+
+<h2 id="s3-6">3.6 工具执行的完整生命周期</h2>
+
+<p>综合以上四节，一次完整的工具调用经历的路径如下：</p>
+
+<pre><code class="language-text">模型发出 tool_use block
+  ↓
+query.ts: 收集到 toolUseBlocks[]
+  ↓
+runTools(toolUseBlocks, ...)                    ← toolOrchestration.ts
+  ↓
+partitionToolCalls()                            ← 按 isConcurrencySafe 分批
+  ↓
+for each batch:
+  isConcurrencySafe=true  → runToolsConcurrently()  → all(generators, cap=10)
+  isConcurrencySafe=false → runToolsSerially()       → for...of
+
+  for each tool in batch:
+    runToolUse(toolUse, ...)                    ← toolExecution.ts
+      ↓
+      findToolByName()                          ← 在 tools[] 里查找
+      ↓
+      tool.inputSchema.safeParse(input)         ← Zod 校验参数
+      ↓
+      tool.validateInput?(input, ctx)           ← 语义前置检查
+      ↓
+      checkPermissionsAndCallTool()             ← 权限流
+        canUseTool(tool, input, ctx)            ← hooks + 用户确认
+        ↓
+        tool.call(args, ctx, ...)               ← 工具主逻辑
+        ↓
+        processToolResultBlock()                ← 结果落盘（若超 maxResultSizeChars）
+        ↓
+        createUserMessage(tool_result)          ← 包装成 user role 消息
+  ↓
+yield MessageUpdate → query.ts 收集 toolResults[]
+  ↓
+三段拼接 → 下一轮 messages[]</code></pre>
+
+<p>这条路径里，每一个环节都是本章某个小节的主题。它们共同构成了 Agent "手"的工作原理：从模型的意图（tool_use block），经过分批调度、权限守卫、实际执行、结果打包，最终以 user role 的 tool_result 注入回消息数组，让模型能"看见"自己的行动结果。</p>
+
+<hr>
+
+<h2>本章代码</h2>
+
+<p>本章的示例工具在 <code>code/examples/tool_demo.py</code>。它实现了一个迷你版工具系统：Tool 接口定义、<code>buildTool</code> 工厂、<code>partitionToolCalls</code> 分批算法、以及 <code>runTools</code> 调度器——与真实源码结构一一对应，但去掉了 React 渲染和 MCP 连接的部分，专注于本章的核心调度逻辑。</p>
+
+<pre><code class="language-python"># 运行（需先设置 ANTHROPIC_API_KEY）
+cd code
+uv run python examples/tool_demo.py</code></pre>
+
+<p>骨架与源码的对应关系：</p>
+
+<pre><code class="language-text"># tool_demo.py 骨架                     ←→  src/ 路径
+
+@dataclass                              # Tool 接口
+class Tool:                             #   src/Tool.ts:281
+  name: str
+  is_concurrency_safe: bool             #   isConcurrencySafe()
+  is_read_only: bool                    #   isReadOnly()
+  call: Callable                        #   call()
+
+def build_tool(def_) → Tool             # buildTool()
+                                        #   src/Tool.ts:783
+
+def partition_tool_calls(tools) → Batch[]  # partitionToolCalls()
+                                           #   src/services/tools/toolOrchestration.ts:84
+
+async def run_tools(batches) → results     # runTools()
+                                           #   src/services/tools/toolOrchestration.ts:23
+
+async def all(generators, cap) → ...       # all()
+                                           #   src/utils/generators.ts:32</code></pre>
+
 <div class="page-nav">
   <button class="page-nav-btn" onclick="showPage('ch2')">
     <span class="nav-dir">← 上一章</span>
@@ -2976,6 +3703,7 @@ return { reason: 'prompt_too_long' }</code></pre>
 
     // 更新导航高亮
     document.querySelectorAll('.nav-chapter.active').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.nav-section.active').forEach(el => el.classList.remove('active'));
     if (id === 'cover') {
       document.querySelector('.nav-chapter[onclick="showPage(\'cover\')"]')?.classList.add('active');
     }
@@ -2985,8 +3713,15 @@ return { reason: 'prompt_too_long' }</code></pre>
       ['ch1','ch2','ch3','ch4','ch5','ch6','ch7','ch8'].forEach(ch => {
         const g = document.getElementById('group-' + ch);
         if (!g) return;
-        if (ch === id) g.classList.add('open');
-        else g.classList.remove('open');
+        if (ch === id) {
+          g.classList.add('open');
+          // 高亮章节标题
+          g.querySelector('.nav-chapter')?.classList.add('active');
+          // 高亮第一个 nav-section（章节入口）
+          g.querySelector('.nav-section')?.classList.add('active');
+        } else {
+          g.classList.remove('open');
+        }
       });
     }
 
@@ -3028,7 +3763,11 @@ return { reason: 'prompt_too_long' }</code></pre>
 
   function showSection(pageId, anchorId) {
     showPage(pageId);
+    // 高亮对应 nav-section（找 onclick 含 anchorId 的那条）
     setTimeout(() => {
+      document.querySelectorAll('.nav-section.active').forEach(el => el.classList.remove('active'));
+      const navItem = document.querySelector(`.nav-section[onclick*="${anchorId}"]`);
+      if (navItem) navItem.classList.add('active');
       const el = document.getElementById(anchorId);
       if (!el) return;
       const top = el.getBoundingClientRect().top + window.scrollY - 64;

@@ -4273,6 +4273,7 @@ spawn_agent 工具（is_concurrency_safe）  # AgentTool.call()
       initFigures(chapterEl);
       initCopyButtons(chapterEl);
       highlightCode(chapterEl);
+      initScrollSpy(id);
     }
 
     loadGiscus(id);
@@ -4398,6 +4399,44 @@ spawn_agent 工具（is_concurrency_safe）  # AgentTool.call()
   }
   function ch1Next(btn) { const fig = btn.closest('.figure'); ch1Render(fig, parseInt(fig.dataset.step || '0', 10) + 1); }
   function ch1Reset(btn) { ch1Render(btn.closest('.figure'), 0); }
+  // ScrollSpy：右侧滚动时自动高亮对应的左侧 nav-section
+  let _spyObserver = null;
+  function initScrollSpy(pageId) {
+    if (_spyObserver) { _spyObserver.disconnect(); _spyObserver = null; }
+    const navItems = document.querySelectorAll(`#group-${pageId} .nav-section`);
+    if (!navItems.length) return;
+    // 收集章节正文里的 h2[id]
+    const headings = Array.from(document.querySelectorAll('#page-chapter h2[id]'));
+    if (!headings.length) return;
+    // 构建 anchorId → navItem 映射（onclick 含该 id）
+    const map = new Map();
+    navItems.forEach(el => {
+      const m = el.getAttribute('onclick')?.match(/'([^']+)'/g);
+      if (m && m.length >= 2) {
+        const anchor = m[1].replace(/'/g, '');
+        map.set(anchor, el);
+      }
+    });
+    let lastActive = null;
+    function setActive(el) {
+      if (el === lastActive) return;
+      navItems.forEach(n => n.classList.remove('active'));
+      if (el) el.classList.add('active');
+      lastActive = el;
+    }
+    _spyObserver = new IntersectionObserver(entries => {
+      // 找最靠近顶部且 intersecting 的标题
+      let top = null;
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          if (!top || e.boundingClientRect.top < top.boundingClientRect.top) top = e;
+        }
+      });
+      if (top) setActive(map.get(top.target.id) || null);
+    }, { rootMargin: '-10% 0px -70% 0px', threshold: 0 });
+    headings.forEach(h => _spyObserver.observe(h));
+  }
+
   // 章节注入后初始化所有交互式配图（innerHTML 不执行 script，所以在这里驱动）
   function initFigures(container) {
     container.querySelectorAll('.figure.ch1-player').forEach(f => ch1Render(f, 0));

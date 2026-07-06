@@ -3,7 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Claude Code 设计与实现</title>
+<title>Claude Code 设计与实现 — 深度解析 Agent 架构</title>
+<meta name="description" content="基于 Claude Code 真实源码，系统解析 Agent Loop、Harness 运行时、工具系统、SubAgent、协调器模式、Agent 间通信、权限安全、Session 持久化八个核心能力层的设计决策。">
+<meta name="keywords" content="Claude Code, Agent, LLM, AI Agent, Agent Loop, Harness, SubAgent, MCP, 架构设计, 源码解析">
+<meta property="og:title" content="Claude Code 设计与实现">
+<meta property="og:description" content="基于真实源码，逐层解析 Claude Code 企业级 Agent 架构的设计决策。">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="zh_CN">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
@@ -1221,7 +1227,7 @@
 </div><!-- #main -->
 
 <!-- ══ 章节内容（内联，避免 file:// 协议 fetch 限制）══ -->
-<template id="tpl-ch1">
+<div hidden id="tpl-ch1">
 <div class="chapter-eyebrow">第一章</div>
 <h1>Agent Loop——内核</h1>
 
@@ -1904,9 +1910,9 @@ while True:                         # ②  循环     while(true)        query.t
     <span class="nav-sub">执行引擎</span>
   </button>
 </div>
-</template>
+</div>
 
-<template id="tpl-ch2">
+<div hidden id="tpl-ch2">
 <div class="chapter-eyebrow">第二章</div>
 <h1>Harness 运行时架构设计</h1>
 <p class="chapter-subtitle">
@@ -2718,9 +2724,9 @@ return { reason: 'prompt_too_long' }</code></pre>
     <span class="nav-sub">Agent 的手</span>
   </button>
 </div>
-</template>
+</div>
 
-<template id="tpl-ch3">
+<div hidden id="tpl-ch3">
 <div class="chapter-eyebrow">第三章</div>
 <h1>工具系统——Agent 的手</h1>
 <p class="chapter-subtitle">
@@ -2745,9 +2751,9 @@ return { reason: 'prompt_too_long' }</code></pre>
     <span class="nav-sub">并行隔离执行</span>
   </button>
 </div>
-</template>
+</div>
 
-<template id="tpl-ch4">
+<div hidden id="tpl-ch4">
 <div class="chapter-eyebrow">第四章</div>
 <h1>SubAgent——并行隔离执行</h1>
 <p class="chapter-subtitle">
@@ -2774,9 +2780,9 @@ return { reason: 'prompt_too_long' }</code></pre>
     <span class="nav-sub">星形多 Agent</span>
   </button>
 </div>
-</template>
+</div>
 
-<template id="tpl-ch5">
+<div hidden id="tpl-ch5">
 <div class="chapter-eyebrow">第五章</div>
 <h1>协调器模式——星形多 Agent</h1>
 <p class="chapter-subtitle">
@@ -2801,9 +2807,9 @@ return { reason: 'prompt_too_long' }</code></pre>
     <span class="nav-sub">Mailbox</span>
   </button>
 </div>
-</template>
+</div>
 
-<template id="tpl-ch6">
+<div hidden id="tpl-ch6">
 <div class="chapter-eyebrow">第六章</div>
 <h1>Agent 间通信——Mailbox</h1>
 <p class="chapter-subtitle">
@@ -2825,9 +2831,9 @@ return { reason: 'prompt_too_long' }</code></pre>
     <span class="nav-title">第七章 · 权限与安全</span>
   </button>
 </div>
-</template>
+</div>
 
-<template id="tpl-ch7">
+<div hidden id="tpl-ch7">
 <div class="chapter-eyebrow">第七章</div>
 <h1>权限与安全</h1>
 <p class="chapter-subtitle">
@@ -2849,9 +2855,9 @@ return { reason: 'prompt_too_long' }</code></pre>
     <span class="nav-title">第八章 · Session 持久化</span>
   </button>
 </div>
-</template>
+</div>
 
-<template id="tpl-ch8">
+<div hidden id="tpl-ch8">
 <div class="chapter-eyebrow">第八章</div>
 <h1>Session 持久化与恢复</h1>
 <p class="chapter-subtitle">
@@ -2873,9 +2879,9 @@ return { reason: 'prompt_too_long' }</code></pre>
     <span class="nav-title">核心文件速查</span>
   </button>
 </div>
-</template>
+</div>
 
-<template id="tpl-ref">
+<div hidden id="tpl-ref">
 <div class="chapter-eyebrow">附录</div>
 <h1>核心文件速查</h1>
 <p class="chapter-subtitle">各章节对应的源码文件与关键函数，配合阅读时直接定位。</p>
@@ -2898,7 +2904,7 @@ return { reason: 'prompt_too_long' }</code></pre>
   </button>
   <div></div>
 </div>
-</template>
+</div>
 
 <!-- Lightbox -->
 <div id="diagram-lightbox" onclick="closeDiagramLightbox()">

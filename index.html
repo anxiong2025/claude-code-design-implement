@@ -758,9 +758,9 @@
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showPage('cover')">1. 简介</a>
-        <a class="nav-section" onclick="showPage('cover')">2. Claude Code 核心组件</a>
-        <a class="nav-section" onclick="showPage('cover')">3. 目录</a>
+        <a class="nav-section" onclick="showSection('cover','cover-intro')">1. 简介</a>
+        <a class="nav-section" onclick="showSection('cover','cover-components')">2. Claude Code 核心组件</a>
+        <a class="nav-section" onclick="showSection('cover','cover-toc')">3. 目录</a>
       </div>
     </div>
 
@@ -890,7 +890,7 @@
       <div class="page active cover" id="page-cover">
         <h1>Claude Code 设计与实现</h1>
 
-        <h2>1. 简介</h2>
+        <h2 id="cover-intro">1. 简介</h2>
         <div class="intro-card">
           <p>本书从零系统学习 Claude Code 的企业级 Agent 核心机制。基于 Claude Code 真实源码，逐层解析 Agent Loop、Harness 运行时、工具系统、SubAgent、协调器模式、Agent 间通信、权限安全、Session 持久化八个核心能力层的设计决策。</p>
           <p>每章配套 Python 实现代码，对照源码行号，读完能真正理解并独立实现一个同等架构的企业级 Agent 系统。</p>
@@ -901,7 +901,7 @@
         </div>
 
         <!-- 架构示意图 -->
-        <h2>2. Claude Code 核心组件</h2>
+        <h2 id="cover-components">2. Claude Code 核心组件</h2>
         <div class="cover-diagram">
           <div class="diagram-eyebrow">Claude Code · Architecture</div>
           <div class="diagram-frame" onclick="openDiagramLightbox()" title="点击放大">
@@ -1120,7 +1120,7 @@
           </div>
         </div>
 
-        <h2>3. 目录</h2>
+        <h2 id="cover-toc">3. 目录</h2>
         <div class="toc-timeline">
 
           <div class="toc-item" onclick="showPage('ch1')">
@@ -2974,13 +2974,15 @@ return { reason: 'prompt_too_long' }</code></pre>
       document.querySelector('.nav-chapter[onclick="showPage(\'cover\')"]')?.classList.add('active');
     }
 
-    // 展开/折叠侧边栏章节组
-    ['ch1','ch2','ch3','ch4','ch5','ch6','ch7','ch8'].forEach(ch => {
-      const g = document.getElementById('group-' + ch);
-      if (!g) return;
-      if (ch === id) g.classList.add('open');
-      else g.classList.remove('open');
-    });
+    // 展开/折叠侧边栏章节组（封面时保持各组原有状态）
+    if (id !== 'cover') {
+      ['ch1','ch2','ch3','ch4','ch5','ch6','ch7','ch8'].forEach(ch => {
+        const g = document.getElementById('group-' + ch);
+        if (!g) return;
+        if (ch === id) g.classList.add('open');
+        else g.classList.remove('open');
+      });
+    }
 
     document.getElementById('toolbar-title').textContent = titles[id] || '';
     current = id;

@@ -358,6 +358,26 @@
     margin: 0;
     font-size: 14px;
   }
+  .goal-card ul {
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .goal-card li {
+    display: flex;
+    gap: 10px;
+    padding: 3px 0;
+    font-size: 14px;
+    color: var(--ink);
+  }
+  .goal-card li .sec-no {
+    flex: none;
+    padding-top: 2px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--accent);
+  }
 
   /* 设计启示 / 心智模型 卡片 */
   .insight {
@@ -835,10 +855,11 @@
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showPage('ch5')">5.1 Coordinator 角色设计</a>
-        <a class="nav-section" onclick="showPage('ch5')">5.2 Worker 结果聚合</a>
-        <a class="nav-section" onclick="showPage('ch5')">5.3 SendMessage 通信协议</a>
-        <a class="nav-section" onclick="showPage('ch5')">5.4 并发管理与任务终止</a>
+        <a class="nav-section" onclick="showSection('ch5','s5-1')">5.1 多 Agent 设计模式全景</a>
+        <a class="nav-section" onclick="showSection('ch5','s5-2')">5.2 Coordinator 角色设计</a>
+        <a class="nav-section" onclick="showSection('ch5','s5-3')">5.3 Worker 结果聚合</a>
+        <a class="nav-section" onclick="showSection('ch5','s5-4')">5.4 SendMessage 通信协议</a>
+        <a class="nav-section" onclick="showSection('ch5','s5-5')">5.5 并发管理与任务终止</a>
       </div>
     </div>
 
@@ -1167,7 +1188,7 @@
             <div class="toc-dot"><div class="toc-dot-inner"></div></div>
             <div class="toc-body">
               <div class="toc-chapter-title">第五章 · 协调器模式——星形多 Agent</div>
-              <div class="toc-chapter-desc">Coordinator 角色设计 · Worker 结果聚合 · SendMessage 协议 · 并发管理</div>
+              <div class="toc-chapter-desc">设计模式全景 · Coordinator 角色 · 结果聚合 · SendMessage 协议 · 并发与终止</div>
             </div>
           </div>
 
@@ -2058,7 +2079,14 @@ while True:                         # ②  循环     while(true)        query.t
 
 <div class="goal-card">
   <div class="goal-card-label">本章目标</div>
-  <p>把第一章那个 25 行骨架放进真实环境会遇到什么问题？Token 超了、上下文撑爆了、记忆没加载——Harness 就是专门应对这些问题的外层引擎。读完本章，你能说清楚：<code>queryLoop</code> 和 <code>query</code> 为什么分成两层、Prompt 在送进模型前经历了哪五步加工、Token 预算如何做到"默认省、需要时自动升"、记忆为何不阻塞主循环、以及上下文撑爆时的两套压缩手段各自在什么时机触发。</p>
+  <p>把第一章那个 25 行骨架放进真实环境会遇到什么问题？Token 超了、上下文撑爆了、记忆没加载——Harness 就是专门应对这些问题的外层引擎。读完本章，你能说清楚：</p>
+  <ul>
+    <li><span class="sec-no">2.1</span><span><code>queryLoop</code> 和 <code>query</code> 为什么分成两层</span></li>
+    <li><span class="sec-no">2.2</span><span>Prompt 在送进模型前经历了哪五步加工</span></li>
+    <li><span class="sec-no">2.3</span><span>Token 预算如何做到"默认省、需要时自动升"</span></li>
+    <li><span class="sec-no">2.4</span><span>记忆预取为何不阻塞主循环</span></li>
+    <li><span class="sec-no">2.5</span><span>上下文撑爆时的两套压缩手段各自在什么时机触发</span></li>
+  </ul>
 </div>
 
 <h2 id="s2-1">2.1 queryLoop 的职责边界</h2>
@@ -2743,7 +2771,14 @@ return { reason: 'prompt_too_long' }</code></pre>
 
 <div class="goal-card">
   <div class="goal-card-label">本章目标</div>
-  <p>读完这章，你会理解：Tool 接口为什么要同时服务四个受众（3.1）、<code>buildTool</code> 的 fail-closed 默认值（3.2）、<code>partitionToolCalls</code> 如何实现"批内并发、批间串行"（3.3）、MCP 外部工具如何无缝融入同一套调度（3.4），以及 ToolSearch 怎么把工具数量对首屏成本的影响从线性降到常数（3.5）。</p>
+  <p>读完这章，你会理解：</p>
+  <ul>
+    <li><span class="sec-no">3.1</span><span>Tool 接口为什么要同时服务四个受众</span></li>
+    <li><span class="sec-no">3.2</span><span><code>buildTool</code> 的 fail-closed 默认值</span></li>
+    <li><span class="sec-no">3.3</span><span><code>partitionToolCalls</code> 如何实现"批内并发、批间串行"</span></li>
+    <li><span class="sec-no">3.4</span><span>MCP 外部工具如何无缝融入同一套调度</span></li>
+    <li><span class="sec-no">3.5</span><span>ToolSearch 怎么把工具数量对首屏成本的影响从线性降到常数</span></li>
+  </ul>
 </div>
 
 <h2 id="s3-1">3.1 Tool 接口——一个契约，四个受众</h2>
@@ -3548,7 +3583,14 @@ async def all(generators, cap) → ...       # all()
 
 <div class="goal-card">
   <div class="goal-card-label">本章目标</div>
-  <p>读完这章，你会理解：AgentTool 如何用一个普通 Tool 接口孵化完整子循环（4.1）、隔离边界上到底有什么能穿过/什么被拦下（4.2）、同步与异步派发在生命周期上的四个差异（4.3）、为什么子 Agent 不能再派生子 Agent 以及 prompt 该怎么写（4.4）、多个并行 Agent 同时写文件时 Worktree 如何兜底（4.5）。</p>
+  <p>读完这章，你会理解：</p>
+  <ul>
+    <li><span class="sec-no">4.1</span><span>AgentTool 如何用一个普通 Tool 接口孵化出完整的子循环</span></li>
+    <li><span class="sec-no">4.2</span><span>隔离边界上到底什么能穿过、什么被拦下</span></li>
+    <li><span class="sec-no">4.3</span><span>同步与异步派发在生命周期上的四个差异</span></li>
+    <li><span class="sec-no">4.4</span><span>为什么子 Agent 不能再派生子 Agent，以及派发 prompt 该怎么写</span></li>
+    <li><span class="sec-no">4.5</span><span>多个并行 Agent 同时写文件时，Worktree 隔离如何兜底</span></li>
+  </ul>
 </div>
 
 <h2 id="s4-1">4.1 派生原理——AgentTool 只是一个普通工具</h2>
@@ -3569,7 +3611,84 @@ const inputSchema = z.object({
 isConcurrencySafe() { return true },
 isReadOnly()        { return true },  // 权限检查下放给子 Agent 内部的每个工具</code></pre>
 
-<p><code>isConcurrencySafe() → true</code> 直接接上了第三章的调度器：模型在同一轮发出三个 <code>Agent</code> 调用，<code>partitionToolCalls</code> 会把它们合并进同一个并发批次——<strong>多个 SubAgent 并行派生不需要任何专门的多 Agent 框架，它只是工具调度的自然结果</strong>。而 <code>isReadOnly() → true</code> 乍看违反直觉（子 Agent 明明可能写文件），其实是权限的转授：派生动作本身不碰任何状态，真正的写操作会在子循环内部逐一走自己的权限检查。</p>
+<p><code>isConcurrencySafe() → true</code> 这一行声明，接上的是第三章的工具调度器。先用一句话回顾它的规则：模型在一轮回复里可以同时发出多个工具调用，分批器 <code>partitionToolCalls</code>（3.3 节）把<strong>相邻的"并发安全"调用合并成一批</strong>——批内并发执行，遇到写操作才切开串行。AgentTool 声明了自己并发安全，于是当模型在同一轮发出三个 <code>Agent</code> 调用时，它们会被合并进同一个并发批次、同时开跑：</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">机制图</span>
+    <span class="figure-title">并行派生 = 工具调度的自然结果 <span class="hint">— 不需要任何专门的多 Agent 框架</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 300" role="img" aria-label="三个 Agent 调用被 partitionToolCalls 合并进同一并发批次">
+    <style>
+      .f4-1 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f4-1 .lt{font-size:12.5px;font-weight:700}
+      .f4-1 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;fill:#6e6353}
+      .f4-1 .ld{font-size:10.5px;fill:#5a5346}
+      .f4-1 .pipe{stroke:#c3bcae;stroke-width:1.6;fill:none}
+    </style>
+    <defs>
+      <marker id="f41a" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#9a8f7b"/></marker>
+      <marker id="f41b" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+    </defs>
+    <g class="f4-1">
+      <!-- Left: one model turn with three tool_use -->
+      <rect x="14" y="30" width="204" height="240" rx="12" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".45"/>
+      <text class="lt" x="116" y="56" text-anchor="middle" fill="#2563EB">模型的一轮回复</text>
+      <text class="ld" x="116" y="72" text-anchor="middle">同时带三个 tool_use 块</text>
+
+      <rect x="28" y="86" width="176" height="48" rx="8" fill="#fff" stroke="#2563EB" stroke-opacity=".35"/>
+      <text class="ls" x="40" y="105">Agent({ prompt:"调研 A" })</text>
+      <text class="ls" x="40" y="121" fill="#1F8F5F">isConcurrencySafe ✓</text>
+
+      <rect x="28" y="144" width="176" height="48" rx="8" fill="#fff" stroke="#2563EB" stroke-opacity=".35"/>
+      <text class="ls" x="40" y="163">Agent({ prompt:"调研 B" })</text>
+      <text class="ls" x="40" y="179" fill="#1F8F5F">isConcurrencySafe ✓</text>
+
+      <rect x="28" y="202" width="176" height="48" rx="8" fill="#fff" stroke="#2563EB" stroke-opacity=".35"/>
+      <text class="ls" x="40" y="221">Agent({ prompt:"调研 C" })</text>
+      <text class="ls" x="40" y="237" fill="#1F8F5F">isConcurrencySafe ✓</text>
+
+      <!-- Middle: partitionToolCalls merges into one batch -->
+      <text class="ls" x="322" y="52" text-anchor="middle" fill="#9a8f7b">partitionToolCalls()</text>
+      <path class="pipe" d="M204,110 C240,110 240,138 262,142" marker-end="url(#f41a)"/>
+      <path class="pipe" d="M204,168 L262,164" marker-end="url(#f41a)"/>
+      <path class="pipe" d="M204,226 C240,226 240,190 262,186" marker-end="url(#f41a)"/>
+
+      <rect x="266" y="122" width="112" height="84" rx="10" fill="#fff" stroke="#9a8f7b" stroke-opacity=".6" stroke-dasharray="5 4"/>
+      <text class="ld" x="322" y="145" text-anchor="middle" font-weight="600" fill="#3a3326">并发批次 #1</text>
+      <text class="ls" x="322" y="166" text-anchor="middle">[ A, B, C ]</text>
+      <text class="ld" x="322" y="188" text-anchor="middle">相邻 + 并发安全</text>
+      <text class="ld" x="322" y="200" text-anchor="middle">→ 合并同批</text>
+
+      <text class="ld" x="322" y="234" text-anchor="middle" fill="#9a8f7b">3.3 节规则：批内并发、</text>
+      <text class="ld" x="322" y="248" text-anchor="middle" fill="#9a8f7b">遇写操作才切批串行</text>
+
+      <!-- Right: three sub-loops run concurrently -->
+      <path class="pipe" d="M378,164 L428,164" stroke="#1F8F5F" marker-end="url(#f41b)"/>
+      <text class="ld" x="403" y="154" text-anchor="middle" fill="#1F8F5F">同时开跑</text>
+
+      <rect x="432" y="30" width="274" height="240" rx="12" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="lt" x="569" y="56" text-anchor="middle" fill="#1F8F5F">批内并发执行</text>
+      <text class="ld" x="569" y="72" text-anchor="middle">三个完整的 query() 子循环并行</text>
+
+      <rect x="446" y="86" width="246" height="48" rx="8" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ls" x="458" y="105">子 Agent A：while(true){ … }</text>
+      <text class="ls" x="458" y="121">独立窗口 · 独立工具池</text>
+
+      <rect x="446" y="144" width="246" height="48" rx="8" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ls" x="458" y="163">子 Agent B：while(true){ … }</text>
+      <text class="ls" x="458" y="179">独立窗口 · 独立工具池</text>
+
+      <rect x="446" y="202" width="246" height="48" rx="8" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ls" x="458" y="221">子 Agent C：while(true){ … }</text>
+      <text class="ls" x="458" y="237">独立窗口 · 独立工具池</text>
+    </g>
+  </svg>
+  <div class="figure-cap">多 SubAgent 并行不需要专门的多 Agent 框架：AgentTool 声明并发安全，模型同轮发出的三个 Agent 调用就会被第三章的分批器 partitionToolCalls 合并进同一批，批内并发执行——三个子循环自然同时跑起来。</div>
+</div>
+
+<p>而 <code>isReadOnly() → true</code> 乍看违反直觉（子 Agent 明明可能写文件），其实是权限的转授：派生动作本身不碰任何状态，真正的写操作会在子循环内部逐一走自己的权限检查。</p>
 
 <h3>4.1.1 AgentDefinition——每种子 Agent 是一份"人格配置"</h3>
 
@@ -4032,14 +4151,735 @@ spawn_agent 工具（is_concurrency_safe）  # AgentTool.call()
 <p class="chapter-subtitle">
   实现目标：一个 Coordinator 同时管多个 Worker，Worker 异步汇报结果，Coordinator 综合后再派新任务。
 </p>
-<h2>5.1 Coordinator 角色设计</h2>
-<p>（内容待填）</p>
-<h2>5.2 Worker 结果聚合</h2>
-<p>（内容待填）</p>
-<h2>5.3 SendMessage 通信协议</h2>
-<p>（内容待填）</p>
-<h2>5.4 并发管理与任务终止</h2>
-<p>（内容待填）</p>
+
+<h2>引言 · 一份提示词，不是一个框架</h2>
+
+<p>第四章末尾留了一个悬念：异步派发（一句话回顾——<code>run_in_background: true</code> 让派生调用立即返回 <code>task_id</code>，子 Agent 的结果在完成后以 <code>task-notification</code> 的形式注入父的后续轮次）给了父 Agent "不等"的能力。但"不等"只是机制，真正的问题是：当三五个 Worker 同时在后台干活、结果乱序抵达时，<strong>谁来拆解任务、消化结果、决定下一步</strong>？主 Agent 的人格必须变——从亲自动手的工程师，变成带团队的 Tech Lead。</p>
+
+<p>Claude Code 对这个问题的回答出人意料地"薄"。翻开源码你会发现，协调器模式没有引入任何新的执行引擎：<code>coordinator/coordinatorMode.ts</code> 全文约 370 行，其中<strong>约 250 行是一个模板字符串——协调器的系统提示词</strong>。剩下的是一个环境变量开关和一段"告诉协调器 Worker 有哪些工具"的上下文注入。派生复用第四章的 AgentTool，追加指令复用 SendMessage 工具，停止复用 TaskStop 工具。<strong>协调器不是一个类，是一份提示词。</strong>这是本章最重要的一课：多 Agent 编排的复杂度大头在提示词工程，不在代码。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">架构总图</span>
+    <span class="figure-title">星形拓扑：Coordinator 居中，一切经过中心 <span class="hint">— Worker 之间没有任何连线</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 450" role="img" aria-label="协调器星形拓扑架构总图">
+    <style>
+      .f5-0 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f5-0 .lt{font-size:12.5px;font-weight:700}
+      .f5-0 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f5-0 .ld{font-size:10.5px;fill:#5a5346}
+      .f5-0 .pipe{stroke-width:1.6;fill:none}
+    </style>
+    <defs>
+      <marker id="f50a" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#2563EB"/></marker>
+      <marker id="f50b" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+      <marker id="f50c" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#9a8f7b"/></marker>
+    </defs>
+    <g class="f5-0">
+      <!-- User -->
+      <rect x="280" y="14" width="160" height="40" rx="9" fill="#fff" stroke="#9a8f7b" stroke-opacity=".6"/>
+      <text class="lt" x="360" y="39" text-anchor="middle" fill="#3a3326">用户</text>
+      <path class="pipe" d="M352,54 L352,104" stroke="#9a8f7b" marker-end="url(#f50c)"/>
+      <path class="pipe" d="M368,104 L368,54" stroke="#9a8f7b" marker-end="url(#f50c)"/>
+      <text class="ld" x="380" y="84" fill="#9a8f7b">对话（所有汇报只说给用户听）</text>
+
+      <!-- Coordinator -->
+      <rect x="225" y="108" width="270" height="118" rx="12" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="lt" x="360" y="132" text-anchor="middle" fill="#2563EB">Coordinator（主循环）</text>
+      <text class="ls" x="360" y="152" text-anchor="middle">人格 = coordinatorMode.ts 的系统提示词</text>
+      <text class="ld" x="360" y="172" text-anchor="middle">只做三件事：拆解派发 · 综合结果 · 汇报用户</text>
+      <text class="ld" x="360" y="190" text-anchor="middle">自己几乎不碰工具，绝不亲自写代码</text>
+      <text class="ls" x="360" y="212" text-anchor="middle" fill="#2563EB">Agent · SendMessage · TaskStop</text>
+
+      <!-- Notification queue -->
+      <rect x="540" y="108" width="166" height="100" rx="10" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".5" stroke-dasharray="5 4"/>
+      <text class="ld" x="623" y="130" text-anchor="middle" font-weight="600" fill="#3a3326">通知队列</text>
+      <text class="ls" x="623" y="150" text-anchor="middle">task-notification</text>
+      <text class="ld" x="623" y="170" text-anchor="middle">回合结束才投递，</text>
+      <text class="ld" x="623" y="186" text-anchor="middle">用户输入永远优先</text>
+      <path class="pipe" d="M540,153 L499,153" stroke="#1F8F5F" marker-end="url(#f50b)"/>
+
+      <!-- Spawn/steer channels -->
+      <path class="pipe" d="M300,226 C300,270 160,272 136,314" stroke="#2563EB" marker-end="url(#f50a)"/>
+      <path class="pipe" d="M360,226 L360,314" stroke="#2563EB" marker-end="url(#f50a)"/>
+      <path class="pipe" d="M420,226 C420,270 560,272 584,314" stroke="#2563EB" marker-end="url(#f50a)"/>
+      <text class="ld" x="185" y="262" fill="#2563EB">Agent（派生）</text>
+      <text class="ld" x="368" y="262" fill="#2563EB">SendMessage（追加指令）</text>
+      <text class="ld" x="560" y="250" fill="#2563EB">TaskStop（停止）</text>
+
+      <!-- Return channel -->
+      <path class="pipe" d="M180,318 L180,296 L622,296 L622,212" stroke="#1F8F5F" stroke-dasharray="6 4" marker-end="url(#f50b)"/>
+      <text class="ld" x="470" y="290" fill="#1F8F5F">完成 / 失败 / 被杀 → task-notification</text>
+
+      <!-- Workers -->
+      <rect x="40" y="318" width="180" height="86" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="lt" x="130" y="342" text-anchor="middle" fill="#1F8F5F" font-size="11.5">Worker A（后台子循环）</text>
+      <text class="ls" x="130" y="362" text-anchor="middle">独立上下文 · 完整工具池</text>
+      <text class="ls" x="130" y="378" text-anchor="middle">Bash / Edit / Read / Skill…</text>
+      <text class="ls" x="130" y="394" text-anchor="middle" fill="#C8344E">（没有 Agent 工具）</text>
+
+      <rect x="270" y="318" width="180" height="86" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="lt" x="360" y="342" text-anchor="middle" fill="#1F8F5F" font-size="11.5">Worker B</text>
+      <text class="ls" x="360" y="362" text-anchor="middle">与 A 并行，互不可见</text>
+      <text class="ls" x="360" y="378" text-anchor="middle">跑完即报，乱序抵达</text>
+
+      <rect x="500" y="318" width="180" height="86" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="lt" x="590" y="342" text-anchor="middle" fill="#1F8F5F" font-size="11.5">Worker C</text>
+      <text class="ls" x="590" y="362" text-anchor="middle">停止后可被 SendMessage</text>
+      <text class="ls" x="590" y="378" text-anchor="middle">复活，上下文还在</text>
+
+      <text class="ld" x="360" y="434" text-anchor="middle" fill="#C8344E">Worker 之间没有连线：星形不是网状，一切信息经过中心汇聚与再分发</text>
+    </g>
+  </svg>
+  <div class="figure-cap">协调器模式的全部拓扑：Coordinator 通过三个工具向外辐射（派生 / 追加 / 停止），Worker 的结果通过通知队列汇回中心。整个"框架"只是一份系统提示词——执行机制全部复用前四章已有的循环、工具与调度。</div>
+</div>
+
+<div class="goal-card">
+  <div class="goal-card-label">本章目标</div>
+  <p>读完这章，你会理解：</p>
+  <ul>
+    <li><span class="sec-no">5.1</span><span>多 Agent 的六种设计模式全景，以及它们在 Claude Code 里各自的化身</span></li>
+    <li><span class="sec-no">5.2</span><span>Coordinator 的人格如何用一份系统提示词定义，为什么"综合"是它不可外包的本职</span></li>
+    <li><span class="sec-no">5.3</span><span>Worker 结果如何变成 task-notification、排队、并在回合边界注入协调器</span></li>
+    <li><span class="sec-no">5.4</span><span>SendMessage 的路由决策树——运行中注入、停止后复活、跨进程投递</span></li>
+    <li><span class="sec-no">5.5</span><span>并发为什么分"硬调度"和"软策略"两层，以及 Worker 的完整生命周期状态机</span></li>
+  </ul>
+</div>
+
+<h2 id="s5-1">5.1 多 Agent 设计模式全景</h2>
+
+<p>在钻进源码之前，先把地图铺开。Anthropic 的工程博客 <a href="https://www.anthropic.com/engineering/building-effective-agents" target="_blank" rel="noopener">Building Effective Agents</a> 把多 LLM 系统归纳成一条光谱：一端是 <strong>Workflow</strong>——LLM 和工具沿着<em>预定义的代码路径</em>编排，可预测、易调试；另一端是 <strong>Agent</strong>——LLM <em>自主决定</em>自己的流程和工具使用，灵活但要交出控制权。光谱上散布着五种可组合的工作流模式，外加自主 Agent 本身：</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">模式地图</span>
+    <span class="figure-title">六种 Agent 设计模式 <span class="hint">— 每一格标注了它在 Claude Code 里的化身</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 530" role="img" aria-label="六种 Agent 设计模式图解">
+    <style>
+      .f5-1 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f5-1 .ct{font-size:12px;font-weight:700;fill:#3a3326}
+      .f5-1 .cb{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;fill:#5a5346}
+      .f5-1 .cd{font-size:9.5px;fill:#6e6353}
+      .f5-1 .cc{font-size:9.5px;fill:#2563EB}
+      .f5-1 .mb{fill:#fff;stroke:#9a8f7b;stroke-opacity:.55}
+      .f5-1 .ma{stroke:#9a8f7b;stroke-width:1.3;fill:none}
+    </style>
+    <defs>
+      <marker id="f51a" markerWidth="7" markerHeight="7" refX="4.5" refY="2.5" orient="auto"><path d="M0,0 L4.5,2.5 L0,5 Z" fill="#9a8f7b"/></marker>
+      <marker id="f51g" markerWidth="7" markerHeight="7" refX="4.5" refY="2.5" orient="auto"><path d="M0,0 L4.5,2.5 L0,5 Z" fill="#1F8F5F"/></marker>
+    </defs>
+    <g class="f5-1">
+      <!-- 1 Prompt Chaining -->
+      <rect x="14" y="14" width="344" height="158" rx="10" fill="#FDFCF9" stroke="#d8d2c4"/>
+      <text class="ct" x="30" y="38">① Prompt Chaining 链式</text>
+      <rect class="mb" x="30" y="72" width="50" height="22" rx="5"/><text class="cb" x="55" y="86" text-anchor="middle">输入</text>
+      <path class="ma" d="M80,83 L94,83" marker-end="url(#f51a)"/>
+      <rect class="mb" x="96" y="72" width="52" height="22" rx="5"/><text class="cb" x="122" y="86" text-anchor="middle">LLM 1</text>
+      <path class="ma" d="M148,83 L162,83" marker-end="url(#f51a)"/>
+      <path d="M180,70 L196,83 L180,96 L164,83 Z" fill="#fff" stroke="#9a8f7b" stroke-opacity=".55"/><text class="cb" x="180" y="87" text-anchor="middle" font-size="8">检查</text>
+      <path class="ma" d="M196,83 L210,83" marker-end="url(#f51a)"/>
+      <rect class="mb" x="212" y="72" width="52" height="22" rx="5"/><text class="cb" x="238" y="86" text-anchor="middle">LLM 2</text>
+      <path class="ma" d="M264,83 L278,83" marker-end="url(#f51a)"/>
+      <rect class="mb" x="280" y="72" width="50" height="22" rx="5"/><text class="cb" x="305" y="86" text-anchor="middle">输出</text>
+      <text class="cd" x="30" y="124">任务拆成固定串行步骤，步骤之间可加程序化检查门。</text>
+      <text class="cc" x="30" y="146">Claude Code：Plan 模式 / spec 流程（规划 → 批准 → 执行）</text>
+
+      <!-- 2 Routing -->
+      <rect x="362" y="14" width="344" height="158" rx="10" fill="#FDFCF9" stroke="#d8d2c4"/>
+      <text class="ct" x="378" y="38">② Routing 路由</text>
+      <rect class="mb" x="378" y="72" width="50" height="22" rx="5"/><text class="cb" x="403" y="86" text-anchor="middle">输入</text>
+      <path class="ma" d="M428,83 L442,83" marker-end="url(#f51a)"/>
+      <rect class="mb" x="444" y="72" width="66" height="22" rx="5"/><text class="cb" x="477" y="86" text-anchor="middle">路由 LLM</text>
+      <path class="ma" d="M510,78 L560,58" marker-end="url(#f51a)"/>
+      <path class="ma" d="M510,83 L560,88" marker-end="url(#f51a)"/>
+      <path class="ma" d="M510,88 L560,118" marker-end="url(#f51a)"/>
+      <rect class="mb" x="562" y="46" width="120" height="20" rx="5"/><text class="cb" x="622" y="59" text-anchor="middle">大模型·难任务</text>
+      <rect class="mb" x="562" y="78" width="120" height="20" rx="5"/><text class="cb" x="622" y="91" text-anchor="middle">小模型·简单任务</text>
+      <rect class="mb" x="562" y="110" width="120" height="20" rx="5"/><text class="cb" x="622" y="123" text-anchor="middle">专用提示词</text>
+      <text class="cd" x="378" y="124">先分类，再送往各自优化过的下游处理。</text>
+      <text class="cc" x="378" y="146">Claude Code：摘要/压缩用 Haiku，subagent_type 选人格</text>
+
+      <!-- 3 Parallelization -->
+      <rect x="14" y="186" width="344" height="158" rx="10" fill="#FDFCF9" stroke="#d8d2c4"/>
+      <text class="ct" x="30" y="210">③ Parallelization 并行</text>
+      <rect class="mb" x="30" y="244" width="50" height="22" rx="5"/><text class="cb" x="55" y="258" text-anchor="middle">任务</text>
+      <path class="ma" d="M80,250 L128,228" marker-end="url(#f51a)"/>
+      <path class="ma" d="M80,255 L128,255" marker-end="url(#f51a)"/>
+      <path class="ma" d="M80,260 L128,282" marker-end="url(#f51a)"/>
+      <rect class="mb" x="130" y="216" width="52" height="20" rx="5"/><text class="cb" x="156" y="229" text-anchor="middle">LLM</text>
+      <rect class="mb" x="130" y="245" width="52" height="20" rx="5"/><text class="cb" x="156" y="258" text-anchor="middle">LLM</text>
+      <rect class="mb" x="130" y="274" width="52" height="20" rx="5"/><text class="cb" x="156" y="287" text-anchor="middle">LLM</text>
+      <path class="ma" d="M182,226 L230,250" marker-end="url(#f51a)"/>
+      <path class="ma" d="M182,255 L230,255" marker-end="url(#f51a)"/>
+      <path class="ma" d="M182,284 L230,260" marker-end="url(#f51a)"/>
+      <rect class="mb" x="232" y="244" width="98" height="22" rx="5"/><text class="cb" x="281" y="258" text-anchor="middle">聚合 / 投票</text>
+      <text class="cd" x="30" y="318">分片提速，或同题多解投票提置信度。</text>
+      <text class="cc" x="30" y="338">Claude Code：3.3 批内并发、4.1 并行 SubAgent、评审多票验证</text>
+
+      <!-- 4 Orchestrator-Workers (protagonist) -->
+      <rect x="362" y="186" width="344" height="158" rx="10" fill="#FDFCF9" stroke="#6D45C9" stroke-width="2"/>
+      <text class="ct" x="378" y="210" fill="#6D45C9">④ Orchestrator-Workers 协调器</text>
+      <rect x="614" y="196" width="76" height="20" rx="10" fill="#6D45C9" opacity=".12"/>
+      <text x="652" y="210" text-anchor="middle" font-size="10" font-weight="700" fill="#6D45C9">本章主角</text>
+      <rect class="mb" x="378" y="244" width="84" height="26" rx="6" stroke="#6D45C9"/><text class="cb" x="420" y="261" text-anchor="middle">协调 LLM</text>
+      <path class="ma" d="M462,248 L560,228" marker-end="url(#f51a)"/>
+      <path class="ma" d="M462,257 L560,257" marker-end="url(#f51a)"/>
+      <path class="ma" d="M462,266 L560,286" marker-end="url(#f51a)"/>
+      <rect class="mb" x="562" y="216" width="98" height="20" rx="5"/><text class="cb" x="611" y="229" text-anchor="middle">Worker</text>
+      <rect class="mb" x="562" y="247" width="98" height="20" rx="5"/><text class="cb" x="611" y="260" text-anchor="middle">Worker</text>
+      <rect class="mb" x="562" y="278" width="98" height="20" rx="5"/><text class="cb" x="611" y="291" text-anchor="middle">Worker</text>
+      <path class="ma" d="M562,296 C500,304 450,296 424,274" stroke="#1F8F5F" stroke-dasharray="5 4" marker-end="url(#f51g)"/>
+      <text class="cd" x="378" y="292" fill="#1F8F5F">↩ 结果汇回，协调者综合</text>
+      <text class="cd" x="378" y="322">子任务不可预定义，由中心 LLM 动态拆解、派发、综合。</text>
+      <text class="cc" x="378" y="338">Claude Code：本章的 Coordinator 模式（提示词即框架）</text>
+
+      <!-- 5 Evaluator-Optimizer -->
+      <rect x="14" y="358" width="344" height="158" rx="10" fill="#FDFCF9" stroke="#d8d2c4"/>
+      <text class="ct" x="30" y="382">⑤ Evaluator-Optimizer 生成-评审</text>
+      <rect class="mb" x="46" y="418" width="76" height="26" rx="6"/><text class="cb" x="84" y="435" text-anchor="middle">生成 LLM</text>
+      <path class="ma" d="M122,424 L196,424" marker-end="url(#f51a)"/>
+      <text class="cd" x="140" y="418">草稿</text>
+      <rect class="mb" x="198" y="418" width="76" height="26" rx="6"/><text class="cb" x="236" y="435" text-anchor="middle">评审 LLM</text>
+      <path class="ma" d="M198,450 C170,466 150,466 122,450" stroke-dasharray="5 4" marker-end="url(#f51a)"/>
+      <text class="cd" x="138" y="472">反馈，重来</text>
+      <path class="ma" d="M274,431 L306,431" marker-end="url(#f51a)"/>
+      <rect class="mb" x="308" y="420" width="36" height="22" rx="5"/><text class="cb" x="326" y="434" text-anchor="middle">✓</text>
+      <text class="cd" x="30" y="492">有明确评价标准时，评审回路能持续抬高质量下限。</text>
+      <text class="cc" x="30" y="510">Claude Code：实现 Worker + 独立验证 Worker 的两层 QA</text>
+
+      <!-- 6 Autonomous Agent -->
+      <rect x="362" y="358" width="344" height="158" rx="10" fill="#FDFCF9" stroke="#d8d2c4"/>
+      <text class="ct" x="378" y="382">⑥ Autonomous Agent 自主体</text>
+      <rect class="mb" x="404" y="418" width="70" height="26" rx="6"/><text class="cb" x="439" y="435" text-anchor="middle">LLM</text>
+      <rect class="mb" x="560" y="418" width="110" height="26" rx="6"/><text class="cb" x="615" y="435" text-anchor="middle">环境（工具）</text>
+      <path class="ma" d="M474,424 L558,424" marker-end="url(#f51a)"/>
+      <text class="cd" x="500" y="418">行动</text>
+      <path class="ma" d="M560,444 C530,462 504,462 474,444" stroke-dasharray="5 4" marker-end="url(#f51a)"/>
+      <text class="cd" x="500" y="470">真实反馈</text>
+      <text class="cd" x="378" y="492">循环直到完成或触发停止条件；步骤不可预测，信任模型决策。</text>
+      <text class="cc" x="378" y="510">Claude Code：第一章的 Agent Loop 本体</text>
+    </g>
+  </svg>
+  <div class="figure-cap">六种设计模式与它们在 Claude Code 里的化身。注意一个事实：Claude Code 没有为任何一种模式单独建框架——模式只是"提示词 + 已有循环机制"的不同组合方式。协调器模式（④）是其中结构最重的一种，本章将看到它的实现依然轻得惊人。</div>
+</div>
+
+<p>这张图上值得停留的观察有三个：</p>
+
+<p><strong>其一，模式不是框架，是任务结构的分类。</strong>任务天然串行就是链式，天然可分片就是并行，<em>无法预先拆解</em>才轮到协调器——协调器模式的定义性特征是"子任务由中心 LLM 在运行时动态决定"，这正是它区别于第三章批内并发（调度器按静态属性分批）的地方。选模式的问题从来不是"哪个更先进"，而是"任务长什么形状"。文章的原则也直白：能用单次 LLM 调用 + 检索解决的，就别上工作流；能用工作流的，就别上自主 Agent——<strong>从最简单的方案开始，只在可测量的收益面前增加复杂度</strong>。</p>
+
+<p><strong>其二，模式可以嵌套。</strong>协调器派出的每个 Worker 自己就是一个自主体（⑥）；协调器把"实现"和"验证"分给不同 Worker，就是在星形里嵌了一个生成-评审回路（⑤）；同轮派发三个调研 Worker，用的是并行（③）。第五章不是替代前四章，是把它们组合起来。</p>
+
+<p><strong>其三，Claude Code 全部六种模式共用同一个执行基座。</strong>链式是提示词约定（先出计划、批准后执行），路由是几行模型选择逻辑，并行是调度器的自然行为（4.1 的机制图），自主体是 query() 循环本身。于是协调器模式剩下的实现问题只有一个：<strong>给循环换一个什么样的人格，才能让它管好别的循环？</strong>这就是下一节。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>市面上的多 Agent 框架大多把六种模式做成六套 API。Claude Code 的做法是反过来的：把"循环 + 工具 + 调度"这一个基座做扎实，模式退化为提示词和调用方式的组合。如果你发现自己在为每种编排方式写新的执行引擎，值得停下来问：这些引擎的差异，是不是本来可以用一段提示词表达？</p>
+</div>
+
+<h2 id="s5-2">5.2 Coordinator 角色设计</h2>
+
+<p>协调器模式由一个环境变量开启。开关本身平平无奇，值得看的是它<em>改变了什么</em>——答案是：只改人格与工具面板，不改循环：</p>
+
+<pre><code class="language-typescript">// coordinator/coordinatorMode.ts — 开关（精简）
+export function isCoordinatorMode(): boolean {
+  return isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE)
+}
+
+// 恢复会话时，模式跟着会话走：不匹配就当场翻转环境变量
+export function matchSessionMode(sessionMode) {
+  if (currentIsCoordinator === sessionIsCoordinator) return undefined
+  process.env.CLAUDE_CODE_COORDINATOR_MODE = sessionIsCoordinator ? '1' : undefined
+  return 'Entered coordinator mode to match resumed session.'
+}</code></pre>
+
+<p>开关打开后发生两件事：主循环的系统提示词被 <code>getCoordinatorSystemPrompt()</code> 整体替换，内置 Agent 列表被替换为 coordinator 专属的 <code>worker</code> 类型。协调器的全部行为规范都在那份约 250 行的提示词里。把它按主题拆开，骨架是这样的：</p>
+
+<pre><code class="language-text">getCoordinatorSystemPrompt() 的内容骨架 —— coordinator/coordinatorMode.ts:111
+
+§1 角色     你是协调者：派工调研/实现/验证，综合结果，与用户沟通。
+            能直接回答的问题就直接答，不为不需要工具的事派工。
+            你的每条消息都是说给用户听的；Worker 的结果是内部信号，
+            不是对话伙伴——永远不要感谢或答复一个通知。
+§2 工具     Agent（派生）· SendMessage（追加）· TaskStop（停止）
+            纪律：不用 Worker 盯 Worker；不派琐碎小事；不设 model 参数；
+            派发后简短告知用户即收口——绝不虚构或预测结果。
+§3 Worker   用 subagent_type: 'worker'；工具池见 5.2.2。
+§4 工作流   调研(并行) → 综合(你本人) → 实现 → 验证；并发策略见 5.5。
+§5 写任务书 Worker 看不到你的对话——每份 prompt 必须自包含；
+            以及本节最重要的规矩：永远先综合，再派工。
+§6 完整示例 一段多轮 few-shot 对话，示范通知如何抵达、如何响应。</code></pre>
+
+<p>其中 §1 的两句话值得放大。<strong>"能直接回答的就直接答"</strong>防的是过度委托——协调器模式最常见的浪费是把一句话能答的问题包装成一次派工。<strong>"永远不要感谢通知"</strong>则暴露了一个实现细节：Worker 的结果会伪装成用户消息抵达（5.3 详述），不加这句约束，模型会礼貌地回复一个 XML 通知"谢谢你的辛勤工作"——对着传送带说客套话。提示词工程的很大一部分，是在给模型解释它所处的物理世界。</p>
+
+<h3>5.2.1 四阶段工作流——"综合"不可外包</h3>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">工作流</span>
+    <span class="figure-title">四阶段循环：调研 → 综合 → 实现 → 验证 <span class="hint">— 只有"综合"必须协调器亲自做</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 250" role="img" aria-label="协调器四阶段工作流">
+    <style>
+      .f5-2 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f5-2 .pt{font-size:12.5px;font-weight:700}
+      .f5-2 .ps{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f5-2 .pd{font-size:10px;fill:#5a5346}
+      .f5-2 .pipe{stroke:#c3bcae;stroke-width:1.6;fill:none}
+    </style>
+    <defs>
+      <marker id="f52a" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#9a8f7b"/></marker>
+      <marker id="f52r" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#C8344E"/></marker>
+    </defs>
+    <g class="f5-2">
+      <rect x="14" y="56" width="150" height="96" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="pt" x="89" y="82" text-anchor="middle" fill="#1F8F5F">① 调研</text>
+      <text class="ps" x="89" y="102" text-anchor="middle">Workers × N</text>
+      <text class="pd" x="89" y="120" text-anchor="middle">只读，自由并行</text>
+      <text class="pd" x="89" y="136" text-anchor="middle">多角度扇出</text>
+      <path class="pipe" d="M164,104 L194,104" marker-end="url(#f52a)"/>
+
+      <rect x="196" y="50" width="150" height="108" rx="10" fill="#EEF3FD" stroke="#2563EB" stroke-width="2"/>
+      <text class="pt" x="271" y="76" text-anchor="middle" fill="#2563EB">② 综合</text>
+      <text class="ps" x="271" y="96" text-anchor="middle">Coordinator 本人</text>
+      <text class="pd" x="271" y="114" text-anchor="middle">读透发现，写出带</text>
+      <text class="pd" x="271" y="130" text-anchor="middle">路径/行号的实现 spec</text>
+      <text class="pd" x="271" y="148" text-anchor="middle" fill="#C8344E" font-weight="600">不可外包</text>
+      <path class="pipe" d="M346,104 L376,104" marker-end="url(#f52a)"/>
+
+      <rect x="378" y="56" width="150" height="96" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="pt" x="453" y="82" text-anchor="middle" fill="#1F8F5F">③ 实现</text>
+      <text class="ps" x="453" y="102" text-anchor="middle">Workers</text>
+      <text class="pd" x="453" y="120" text-anchor="middle">按文件集串行</text>
+      <text class="pd" x="453" y="136" text-anchor="middle">自测后提交并报 hash</text>
+      <path class="pipe" d="M528,104 L558,104" marker-end="url(#f52a)"/>
+
+      <rect x="560" y="56" width="150" height="96" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="pt" x="635" y="82" text-anchor="middle" fill="#1F8F5F">④ 验证</text>
+      <text class="ps" x="635" y="102" text-anchor="middle">Workers（新面孔）</text>
+      <text class="pd" x="635" y="120" text-anchor="middle">证明能跑，不是确认</text>
+      <text class="pd" x="635" y="136" text-anchor="middle">存在；拒绝橡皮章</text>
+
+      <path class="pipe" d="M635,152 C635,222 330,230 280,162" stroke="#C8344E" stroke-dasharray="6 4" marker-end="url(#f52r)"/>
+      <text class="pd" x="450" y="184" text-anchor="middle" fill="#C8344E">失败 → 回到综合：续跑原 Worker（带错误上下文）或换思路</text>
+
+      <text class="ps" x="360" y="238" text-anchor="middle">好 spec 的样子：文件路径 + 行号 + 改什么 + 完成标准（"提交并报 hash"）</text>
+    </g>
+  </svg>
+  <div class="figure-cap">四阶段中三个阶段都可以派工，唯独"综合"必须协调器亲自完成——这是整份系统提示词强调最重的一条纪律，源码原话是"your most important job"。</div>
+</div>
+
+<p>为什么综合不可外包？提示词里有一段近乎严厉的规定：<strong>禁止写 "based on your findings"（基于你的发现）这类句子</strong>。对比一下两种派工方式：</p>
+
+<pre><code class="language-typescript">// 反模式 —— 偷懒转发，把"理解"外包给了 Worker
+Agent({ prompt: "Based on your findings, fix the auth bug" })
+Agent({ prompt: "上一个 Worker 发现了 auth 模块的问题，请修复" })
+
+// 正确 —— 协调器先消化调研结果，再写出自包含的 spec
+Agent({ prompt: "修复 src/auth/validate.ts:42 的空指针。Session 上的 user 字段
+  （src/auth/types.ts:15）在会话过期但 token 仍被缓存时是 undefined。
+  在访问 user.id 前加空检查——为 null 时返回 401 'Session expired'。
+  跑相关测试和 typecheck，提交并报告 hash。" })</code></pre>
+
+<p>两者的差别不是措辞，是<strong>信息在哪里汇聚</strong>。星形拓扑里 Worker 互不可见，唯一看得到全局的节点是中心。如果中心只做转发（"把 A 的发现交给 B"），全局视野就没人拥有了——B 拿到的是二手转述，A 的上下文已经烧掉，出了错没有任何节点能兜底。协调器的价值不是"分派"这个动作，而是<strong>它是全系统唯一被强制读懂一切的节点</strong>。这也解释了为什么提示词要求 spec 里必须出现具体路径和行号：这些细节是"我真的读懂了"的可验证证据，写不出来就说明综合没做。</p>
+
+<h3>5.2.2 Worker 的工具池——星形是删出来的</h3>
+
+<p>Worker 不是一种新机制，就是第四章的异步 SubAgent，但它的工具白名单经过了刻意裁剪（<code>constants/tools.ts</code>）：</p>
+
+<pre><code class="language-typescript">// Worker 工具池 = 异步 Agent 白名单 - 内部工具
+export const ASYNC_AGENT_ALLOWED_TOOLS = new Set([
+  FILE_READ, GREP, GLOB, BASH, FILE_EDIT, FILE_WRITE,   // 读写与执行
+  WEB_SEARCH, WEB_FETCH, SKILL, TOOL_SEARCH,            // 检索与技能
+  ENTER_WORKTREE, EXIT_WORKTREE, TODO_WRITE, ...        // 隔离与规划
+])
+// 注意名单里没有的：Agent（不能再派生）、SendMessage（不能互发消息）
+// —— INTERNAL_WORKER_TOOLS 进一步移除 TeamCreate/TeamDelete/SendMessage</code></pre>
+
+<p>删掉的两个工具正好定义了拓扑。<strong>没有 Agent 工具</strong>，Worker 无法再派生——这是 4.4 讲过的防递归约束（一句话回顾：派生深度上限为 2，防的是失控的 Agent 树和不可判定的生命周期）在协调器模式下的延续：结构是星形，不是树形。<strong>没有 SendMessage</strong>，Worker 之间无法直连——所有信息必须经过中心，保证了协调器的全局视野不被旁路。星形不是画出来的，是从完整工具池里删出来的。</p>
+
+<p>与此对称，协调器一侧通过 <code>getCoordinatorUserContext()</code> 收到一份"Worker 能力说明书"注入上下文：Worker 有哪些工具、连了哪些 MCP Server、以及一个所有 Worker 免许可读写的 <strong>scratchpad 目录</strong>——提示词称之为"durable cross-worker knowledge"，一块跨 Worker 的持久黑板。Worker 之间不能对话，但可以往黑板上写调研笔记供后继者读，这是星形拓扑里唯一的"旁路"，而它是文件而非消息——异步、可审计、不破坏拓扑。</p>
+
+<h3>5.2.3 续跑还是新开——上下文重叠度决策</h3>
+
+<p>调研 Worker 完成后，协调器手里有两个选项：用 SendMessage 让<em>同一个</em> Worker 继续干（它已经加载的上下文还在），或者用 Agent 新开一个。提示词给了一张决策表，判据只有一条：<strong>旧上下文对下一个任务是资产还是污染</strong>：</p>
+
+<table>
+  <thead>
+    <tr><th>情形</th><th>选择</th><th>为什么</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>调研恰好读过要改的那些文件</td><td><strong>续跑</strong></td><td>文件已在上下文里，spec 一到就能动手</td></tr>
+    <tr><td>调研很广、实现很窄</td><td>新开</td><td>别拖着探索噪音进实现，干净上下文更聚焦</td></tr>
+    <tr><td>修正它自己刚犯的错</td><td><strong>续跑</strong></td><td>错误现场还在它脑子里，一句话就能定位</td></tr>
+    <tr><td>验证别的 Worker 写的代码</td><td>新开</td><td>验证者要新鲜眼光，不能带着实现者的假设</td></tr>
+    <tr><td>第一次实现方向整个错了</td><td>新开</td><td>错误路径会锚定重试，干净起步避免路径依赖</td></tr>
+    <tr><td>完全无关的新任务</td><td>新开</td><td>没有可复用的上下文</td></tr>
+  </tbody>
+</table>
+
+<p>这张表其实是第四章"上下文经济学"的续篇：4.4 说 SubAgent 是一次性的可丢弃窗口，本节补上另一半——<strong>窗口也可以不丢，前提是里面装的东西对下一步有用</strong>。续跑省掉的是重新加载文件的成本，新开省掉的是被旧假设带偏的风险，两边都是上下文的账。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>协调器提示词里最有工程味的规定，都是在防"责任真空"：综合不可外包（全局视野必须有人拥有）、spec 必须带路径行号（理解必须可验证）、派发后立即收口绝不虚构结果（状态必须来自通知而非想象）。设计多 Agent 系统时，比"怎么拆任务"更先回答的问题是：<strong>每一份理解，由哪个节点负责持有？</strong></p>
+  <p><span class="role">给产品经理</span>"协调器自己几乎不干活"不是低效，是角色净化：它的产出物是任务书和给用户的汇报，这两样恰恰是用户唯一能看到的界面。中心节点的质量决定用户对整个多 Agent 系统的感知质量。</p>
+</div>
+
+<h2 id="s5-3">5.3 Worker 结果聚合——task-notification 的一生</h2>
+
+<p>Worker 跑完了，结果怎么回到协调器？第四章末尾只说了一句"以 task-notification 注入后续轮次"，现在拆开看全程。每个 Worker 在系统里是一个 <code>LocalAgentTask</code>（<code>tasks/LocalAgentTask/LocalAgentTask.tsx</code>），从完成到被协调器读到，要走四步：</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">流水线</span>
+    <span class="figure-title">通知流水线：完成 → 构造 XML → 排队 → 回合边界注入 <span class="hint">— 用户输入永远插在通知前面</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 320" role="img" aria-label="task-notification 通知流水线">
+    <style>
+      .f5-3 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f5-3 .lt{font-size:12px;font-weight:700}
+      .f5-3 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f5-3 .ld{font-size:10px;fill:#5a5346}
+      .f5-3 .pipe{stroke-width:1.6;fill:none}
+    </style>
+    <defs>
+      <marker id="f53a" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+    </defs>
+    <g class="f5-3">
+      <!-- Worker lane -->
+      <rect x="14" y="16" width="212" height="266" rx="12" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".45"/>
+      <text class="lt" x="120" y="40" text-anchor="middle" fill="#1F8F5F">Worker 子循环</text>
+      <text class="ld" x="120" y="62" text-anchor="middle">① 跑完最后一轮</text>
+      <rect x="28" y="76" width="184" height="40" rx="8" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ls" x="120" y="93" text-anchor="middle">enqueueAgentNotification()</text>
+      <text class="ls" x="120" y="108" text-anchor="middle">notified 原子置位（去重）</text>
+      <rect x="28" y="128" width="184" height="140" rx="8" fill="#fff" stroke="#9a8f7b" stroke-opacity=".4"/>
+      <text class="ls" x="40" y="147">&lt;task-notification&gt;</text>
+      <text class="ls" x="52" y="164">&lt;task-id&gt; 续跑用的地址</text>
+      <text class="ls" x="52" y="180">&lt;status&gt; completed|</text>
+      <text class="ls" x="70" y="195">failed|killed</text>
+      <text class="ls" x="52" y="211">&lt;result&gt; 最终文本</text>
+      <text class="ls" x="52" y="227">&lt;usage&gt; tokens/工具数</text>
+      <text class="ls" x="52" y="243">&lt;output-file&gt; 全程落盘</text>
+      <text class="ls" x="40" y="260">&lt;/task-notification&gt;</text>
+
+      <path class="pipe" d="M226,150 L268,150" stroke="#1F8F5F" marker-end="url(#f53a)"/>
+      <text class="ld" x="247" y="140" text-anchor="middle" fill="#1F8F5F">②</text>
+
+      <!-- Queue lane -->
+      <rect x="270" y="16" width="190" height="266" rx="12" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".5"/>
+      <text class="lt" x="365" y="40" text-anchor="middle" fill="#3a3326">命令队列（优先级）</text>
+      <rect x="284" y="58" width="162" height="34" rx="7" fill="#fff" stroke="#9a8f7b" stroke-opacity=".4"/>
+      <text class="ls" x="365" y="73" text-anchor="middle">now：立即处理</text>
+      <text class="ld" x="365" y="86" text-anchor="middle">（中断类）</text>
+      <rect x="284" y="100" width="162" height="34" rx="7" fill="#fff" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="ls" x="365" y="115" text-anchor="middle" fill="#2563EB">next：用户输入</text>
+      <text class="ld" x="365" y="128" text-anchor="middle" fill="#2563EB">永远排在通知前面</text>
+      <rect x="284" y="142" width="162" height="34" rx="7" fill="#fff" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="ls" x="365" y="157" text-anchor="middle" fill="#1F8F5F">later：task-notification</text>
+      <text class="ld" x="365" y="170" text-anchor="middle" fill="#1F8F5F">系统消息不与人抢话</text>
+      <text class="ld" x="365" y="210" text-anchor="middle">③ 排队等待，队内 FIFO</text>
+      <text class="ld" x="365" y="242" text-anchor="middle">"user input is never</text>
+      <text class="ld" x="365" y="257" text-anchor="middle">starved by system messages"</text>
+
+      <path class="pipe" d="M460,150 L502,150" stroke="#1F8F5F" marker-end="url(#f53a)"/>
+      <text class="ld" x="481" y="140" text-anchor="middle" fill="#1F8F5F">④</text>
+
+      <!-- Coordinator lane -->
+      <rect x="504" y="16" width="202" height="266" rx="12" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".45"/>
+      <text class="lt" x="605" y="40" text-anchor="middle" fill="#2563EB">Coordinator 主循环</text>
+      <text class="ld" x="605" y="66" text-anchor="middle">当前回合进行中…</text>
+      <text class="ld" x="605" y="82" text-anchor="middle">（绝不打断）</text>
+      <line x1="518" y1="98" x2="692" y2="98" stroke="#C8344E" stroke-width="1.6" stroke-dasharray="6 4"/>
+      <text class="ld" x="605" y="114" text-anchor="middle" fill="#C8344E">—— 回合结束 ——</text>
+      <rect x="518" y="128" width="174" height="72" rx="8" fill="#fff" stroke="#2563EB" stroke-opacity=".4"/>
+      <text class="ld" x="605" y="148" text-anchor="middle">通知以 user 角色</text>
+      <text class="ld" x="605" y="164" text-anchor="middle">注入下一回合输入，</text>
+      <text class="ld" x="605" y="180" text-anchor="middle">与真用户消息并列</text>
+      <text class="ld" x="605" y="226" text-anchor="middle">模型靠 &lt;task-notification&gt;</text>
+      <text class="ld" x="605" y="242" text-anchor="middle">标签识别"这不是人"</text>
+      <text class="ld" x="605" y="264" text-anchor="middle" fill="#C8344E">所以提示词要求：别感谢它</text>
+    </g>
+  </svg>
+  <div class="figure-cap">通知的一生：Worker 终态触发 XML 构造（notified 标志原子去重），进入 later 优先级排队（用户输入是 next，永远插队），在协调器回合结束的边界以 user 角色消息注入。协议的"解析器"不是代码，是系统提示词里教给模型的标签识别规则。</div>
+</div>
+
+<p>构造通知的源码浓缩后只有一小段，但每个字段都有讲究（<code>LocalAgentTask.tsx:197</code>）：</p>
+
+<pre><code class="language-typescript">// enqueueAgentNotification —— 精简
+let shouldEnqueue = false
+updateTaskState(taskId, setAppState, task => {
+  if (task.notified) return task          // 已通知过：原子去重，防止重复消息
+  shouldEnqueue = true
+  return { ...task, notified: true }
+})
+if (!shouldEnqueue) return
+
+const message = `&lt;task-notification&gt;
+&lt;task-id&gt;${taskId}&lt;/task-id&gt;                    // 续跑地址：SendMessage 的 to
+&lt;output-file&gt;${outputPath}&lt;/output-file&gt;        // 全程输出落盘，可追查细节
+&lt;status&gt;${status}&lt;/status&gt;                      // completed | failed | killed
+&lt;summary&gt;${summary}&lt;/summary&gt;${resultSection}${usageSection}${worktreeSection}
+&lt;/task-notification&gt;`
+
+enqueuePendingNotification({ value: message, mode: 'task-notification' })
+// ↑ 优先级 'later'：注释原话——"so user input is never starved by system messages"</code></pre>
+
+<p>三个设计决定值得点名：</p>
+
+<p><strong>投递时机选在回合边界，而不是实时打断。</strong>协调器正在生成回复时，哪怕三个 Worker 同时完成，也要等这一轮说完话。这不是技术限制——第二章讲过循环的输入队列机制（一句话回顾：所有外部输入统一进队列，回合之间统一消化），是刻意保持协调器<strong>每一轮的输入都是一个完整快照</strong>：乱序抵达的结果在队列里排好，模型一次看到当前全部新信息再规划下一步，而不是被每条通知打断成碎片决策。</p>
+
+<p><strong>用户输入的优先级永远高于通知。</strong>队列有 now / next / later 三级，用户消息是 next，通知是 later。五个 Worker 排队汇报时用户插了一句话，下一轮模型先看到人说了什么。多 Agent 系统很容易演成"系统自言自语，用户插不上嘴"，这一行优先级排序是对它的制度性防御。</p>
+
+<p><strong>result 之外还有 output-file。</strong>通知里的 <code>&lt;result&gt;</code> 只是 Worker 的最终文本（第四章的"结论二十行"），但完整过程始终落盘。协调器觉得结论可疑时，可以派下一个任务去读文件核查——聚合默认是轻的，但审计通道永远敞开。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>注意全书反复出现的同构：工具结果靠 tool_result 注入（第一章）、SubAgent 结论靠最终文本回传（第四章）、Worker 汇报靠 task-notification 注入（本章）。Claude Code 里<strong>所有的"回传"都是同一件事——把内容放进对方下一轮的输入里</strong>。没有回调、没有事件总线、没有共享内存，只有消息进队列。这让每个 Agent 的世界模型保持极简：我看到的就是我的 messages 数组。</p>
+</div>
+
+<h2 id="s5-4">5.4 SendMessage 通信协议</h2>
+
+<p>协调器手里最灵的工具是 <code>SendMessage({ to, message })</code>。它的输入极简，本事全在路由上——同一个工具，根据 <code>to</code> 指向的对象状态走出完全不同的路径（<code>SendMessageTool.ts:741</code> 的 call 方法）：</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">决策树</span>
+    <span class="figure-title">SendMessage 路由：同一个 to，四种命运 <span class="hint">— 绿色是本章路径，灰色第六章展开</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 330" role="img" aria-label="SendMessage 路由决策树">
+    <style>
+      .f5-4 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f5-4 .lt{font-size:11.5px;font-weight:700}
+      .f5-4 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f5-4 .ld{font-size:10px;fill:#5a5346}
+      .f5-4 .pipe{stroke-width:1.5;fill:none}
+    </style>
+    <defs>
+      <marker id="f54g" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+      <marker id="f54n" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#9a8f7b"/></marker>
+    </defs>
+    <g class="f5-4">
+      <rect x="262" y="14" width="196" height="46" rx="10" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".55"/>
+      <text class="ls" x="360" y="34" text-anchor="middle" fill="#2563EB">SendMessage({ to, message })</text>
+      <text class="ld" x="360" y="50" text-anchor="middle">to 指向什么？</text>
+
+      <path class="pipe" d="M300,60 C220,84 130,96 96,128" stroke="#1F8F5F" marker-end="url(#f54g)"/>
+      <path class="pipe" d="M340,60 C310,92 290,100 278,128" stroke="#1F8F5F" marker-end="url(#f54g)"/>
+      <path class="pipe" d="M390,60 C420,92 440,100 452,128" stroke="#9a8f7b" marker-end="url(#f54n)"/>
+      <path class="pipe" d="M420,60 C500,84 590,96 624,128" stroke="#9a8f7b" marker-end="url(#f54n)"/>
+
+      <text class="ld" x="150" y="102" text-anchor="middle" fill="#1F8F5F">运行中的 Worker</text>
+      <text class="ld" x="300" y="112" text-anchor="middle" fill="#1F8F5F">已停止 / 已被驱逐</text>
+      <text class="ld" x="435" y="112" text-anchor="middle" fill="#9a8f7b">'*' 或队友名</text>
+      <text class="ld" x="590" y="102" text-anchor="middle" fill="#9a8f7b">bridge: / uds:</text>
+
+      <rect x="14" y="132" width="166" height="116" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".55"/>
+      <text class="lt" x="97" y="154" text-anchor="middle" fill="#1F8F5F">排队注入</text>
+      <text class="ls" x="97" y="174" text-anchor="middle">queuePendingMessage</text>
+      <text class="ld" x="97" y="194" text-anchor="middle">进 pendingMessages[]，</text>
+      <text class="ld" x="97" y="210" text-anchor="middle">下一个工具轮边界被取走</text>
+      <text class="ld" x="97" y="226" text-anchor="middle">——不打断进行中的调用</text>
+
+      <rect x="196" y="132" width="166" height="116" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".55"/>
+      <text class="lt" x="279" y="154" text-anchor="middle" fill="#1F8F5F">磁盘复活</text>
+      <text class="ls" x="279" y="174" text-anchor="middle">resumeAgentBackground</text>
+      <text class="ld" x="279" y="194" text-anchor="middle">读回 transcript，三重清洗，</text>
+      <text class="ld" x="279" y="210" text-anchor="middle">带着全部旧上下文</text>
+      <text class="ld" x="279" y="226" text-anchor="middle">继续对话</text>
+
+      <rect x="378" y="132" width="156" height="116" rx="10" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".5" stroke-dasharray="5 4"/>
+      <text class="lt" x="456" y="154" text-anchor="middle" fill="#6e6353">Mailbox 投递</text>
+      <text class="ls" x="456" y="174" text-anchor="middle">writeToMailbox</text>
+      <text class="ld" x="456" y="194" text-anchor="middle">写入队友信箱文件，</text>
+      <text class="ld" x="456" y="210" text-anchor="middle">'*' 则广播全队</text>
+      <text class="ld" x="456" y="230" text-anchor="middle" fill="#9a8f7b">→ 第六章</text>
+
+      <rect x="550" y="132" width="156" height="116" rx="10" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".5" stroke-dasharray="5 4"/>
+      <text class="lt" x="628" y="154" text-anchor="middle" fill="#6e6353">跨进程投递</text>
+      <text class="ls" x="628" y="174" text-anchor="middle">peerSessions / UDS</text>
+      <text class="ld" x="628" y="194" text-anchor="middle">送往另一个 Claude</text>
+      <text class="ld" x="628" y="210" text-anchor="middle">会话或本机 socket</text>
+      <text class="ld" x="628" y="230" text-anchor="middle" fill="#9a8f7b">→ 第六章</text>
+
+      <text class="ld" x="360" y="286" text-anchor="middle" fill="#C8344E">四条路径殊途同归：把 message 放进接收方下一轮的输入里</text>
+      <text class="ld" x="360" y="306" text-anchor="middle">接收方永远以为自己收到了一条普通 user 消息——"协调器"概念只存在于协调器自己的提示词里</text>
+    </g>
+  </svg>
+  <div class="figure-cap">SendMessage 的路由按接收方状态分派。对本章重要的是左侧两条绿色路径：运行中排队注入、停止后磁盘复活——它们共同实现了"Worker 可以被随时追加指令"的体验。</div>
+</div>
+
+<p>两条绿色路径的源码骨架：</p>
+
+<pre><code class="language-typescript">// SendMessageTool.call() —— 本进程 Worker 分支（精简）
+const task = appState.tasks[agentId]
+if (task.status === 'running') {
+  // ① 运行中：进 pendingMessages，绝不打断
+  queuePendingMessage(agentId, input.message, setAppState)
+  return { message: `已排队，将在 ${to} 的下一个工具轮送达` }
+}
+// ② 已停止（completed / failed / killed）甚至已被驱逐出内存：
+//    从磁盘 transcript 复活，带着全部旧上下文继续
+const result = await resumeAgentBackground({ agentId, prompt: input.message, ... })</code></pre>
+
+<p><strong>路径①的关键词是"工具轮边界"。</strong>Worker 正在跑一个 Bash 命令时收到新指令，指令不会打断命令，而是进入该任务的 <code>pendingMessages</code> 数组；Worker 每轮工具执行结束、准备下一次模型调用时，<code>drainPendingMessages</code> 把攒下的消息全部取走，作为附件拼进下一轮输入（<code>attachments.ts:1085</code>）。这和 5.3 协调器收通知的时机选择是同一个哲学的两个方向：<strong>消息永远在回合边界交接，任何 Agent 的任何一轮都不被打断</strong>。打断意味着半途而废的工具调用和被撕裂的思路，排队意味着每轮开始时世界是完整的。</p>
+
+<p><strong>路径②回收了第四章埋的伏笔。</strong>4.3 说过子 Agent 的 transcript 会落盘（当时的用途是"可查"）；现在它多了一个用途——<strong>可复活</strong>。<code>resumeAgentBackground</code> 从磁盘读回消息数组，做三重清洗（丢弃未解决的 tool_use、孤儿 thinking 块、空白 assistant 消息——都是中断可能留下的残渣），重建工具池和系统提示词，然后像什么都没发生过一样继续对话。对协调器而言，"Worker 停了"不是句号，是逗号：一个 completed 的调研 Worker，三轮之后仍能被一句 <code>SendMessage</code> 唤回来干实现，它读过的三十个文件还在脑子里。</p>
+
+<p>最值得回味的是图底部那行字：<strong>接收方永远以为自己收到了普通 user 消息</strong>。Worker 的循环里没有"协调器"这个概念，没有任何针对多 Agent 的特殊代码——它就是第一章那个循环，收消息、干活、回话。整个协调器模式是<strong>单方面的</strong>：只有中心知道自己在协调，成员只是在过普通的 Agent 生活。这种不对称让系统的每个组件都保持最简单的世界模型，复杂度全部收敛在中心一点。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>很多多 Agent 框架为"Agent 间通信"设计了 RPC、话题订阅、共享状态。Claude Code 的答案是：通信 = 往对方的下一轮输入里放一条消息，状态 = 对方自己的 messages 数组。协议瘦到只剩投递语义，因为<strong>接收方是一个 LLM，它最擅长的就是理解自然语言消息</strong>——传输层不需要表达业务语义，业务语义在消息文本里。</p>
+</div>
+
+<h2 id="s5-5">5.5 并发管理与任务终止</h2>
+
+<h3>5.5.1 两层并发控制——硬调度与软策略</h3>
+
+<p>协调器模式下，"并发"这个词同时发生在两层，很容易混淆，值得摆在一起看清楚：</p>
+
+<pre><code class="language-text">层级         谁做决定                   管什么                     什么性质
+──────────────────────────────────────────────────────────────────────────
+硬调度       partitionToolCalls        一轮内的多个工具调用        代码强制
+（第三章）    （按 isConcurrencySafe    读并发、写独占              绝不越界
+              静态属性分批）
+──────────────────────────────────────────────────────────────────────────
+软策略       协调器（提示词约定）        跨任务的 Worker 编排        模型自觉
+（本章）      "调研自由并行；             写任务按文件集串行；        可能违反
+              实现一次一个文件集"        验证可与实现交叠</code></pre>
+
+<p>为什么软策略不能也做成硬调度？因为<strong>判断"两个实现任务会不会改到同一批文件"需要理解任务语义</strong>，而调度器只看得见工具调用的静态属性。"修 auth 模块的空指针"和"给 payment 模块加日志"能不能并行，取决于两个模块有没有共享文件——这是语义问题，只有读得懂任务书的模型答得了。于是 Claude Code 把这层判断放进提示词（"Write-heavy tasks — one at a time per set of files"），由协调器在派发时自行掂量。守不住怎么办？第四章的 Worktree 隔离（一句话回顾：每个 Worker 可在独立的 git 工作树里干活，改动以分支交付）就是软策略失守时的硬兜底——策略防冲突于未然，隔离保证冲突真发生时不损坏任何东西。</p>
+
+<h3>5.5.2 停止、复活与生命周期状态机</h3>
+
+<p>把 5.3、5.4 讲过的所有转换拼起来，Worker 的一生是一张完整的状态机：</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">生命周期</span>
+    <span class="figure-title">Worker 状态机：终态不是终点 <span class="hint">— 只要 transcript 在盘上，就能复活</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 310" role="img" aria-label="Worker 生命周期状态机">
+    <style>
+      .f5-5 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f5-5 .st{font-size:11.5px;font-weight:700}
+      .f5-5 .ss{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;fill:#6e6353}
+      .f5-5 .sd{font-size:9.5px;fill:#5a5346}
+      .f5-5 .pipe{stroke-width:1.5;fill:none}
+    </style>
+    <defs>
+      <marker id="f55a" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#9a8f7b"/></marker>
+      <marker id="f55g" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+      <marker id="f55r" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#C8344E"/></marker>
+    </defs>
+    <g class="f5-5">
+      <text class="ss" x="30" y="120">Agent({...})</text>
+      <path class="pipe" d="M30,128 L96,128" stroke="#9a8f7b" marker-end="url(#f55a)"/>
+
+      <rect x="98" y="96" width="130" height="64" rx="12" fill="#E9F5EE" stroke="#1F8F5F" stroke-width="1.8"/>
+      <text class="st" x="163" y="122" text-anchor="middle" fill="#1F8F5F">running</text>
+      <text class="ss" x="163" y="140" text-anchor="middle">后台子循环运转中</text>
+
+      <path class="pipe" d="M163,96 C120,56 120,40 150,36 C180,32 190,56 172,92" stroke="#1F8F5F" stroke-dasharray="5 4" marker-end="url(#f55g)"/>
+      <text class="sd" x="238" y="36" fill="#1F8F5F">SendMessage → pendingMessages，下一工具轮注入（不打断）</text>
+
+      <path class="pipe" d="M228,110 L330,74" stroke="#9a8f7b" marker-end="url(#f55a)"/>
+      <path class="pipe" d="M228,128 L330,128" stroke="#9a8f7b" marker-end="url(#f55a)"/>
+      <path class="pipe" d="M228,146 L330,182" stroke="#C8344E" marker-end="url(#f55r)"/>
+      <text class="sd" x="248" y="168" fill="#C8344E">TaskStop / ESC 全杀</text>
+
+      <rect x="332" y="52" width="118" height="42" rx="10" fill="#fff" stroke="#1F8F5F" stroke-opacity=".55"/>
+      <text class="st" x="391" y="70" text-anchor="middle" fill="#1F8F5F" font-size="11">completed</text>
+      <text class="ss" x="391" y="86" text-anchor="middle">最终文本回传</text>
+      <rect x="332" y="108" width="118" height="42" rx="10" fill="#fff" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="st" x="391" y="126" text-anchor="middle" fill="#6e6353" font-size="11">failed</text>
+      <text class="ss" x="391" y="142" text-anchor="middle">错误上下文还在</text>
+      <rect x="332" y="164" width="118" height="42" rx="10" fill="#fff" stroke="#C8344E" stroke-opacity=".6"/>
+      <text class="st" x="391" y="182" text-anchor="middle" fill="#C8344E" font-size="11">killed</text>
+      <text class="ss" x="391" y="198" text-anchor="middle">部分结果仍回传</text>
+
+      <path class="pipe" d="M450,73 L510,106" stroke="#9a8f7b" marker-end="url(#f55a)"/>
+      <path class="pipe" d="M450,129 L510,124" stroke="#9a8f7b" marker-end="url(#f55a)"/>
+      <path class="pipe" d="M450,185 L510,142" stroke="#9a8f7b" marker-end="url(#f55a)"/>
+
+      <rect x="512" y="100" width="90" height="48" rx="10" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="st" x="557" y="120" text-anchor="middle" fill="#3a3326" font-size="11">notified</text>
+      <text class="ss" x="557" y="138" text-anchor="middle">通知一次，去重</text>
+
+      <path class="pipe" d="M602,124 L648,124" stroke="#9a8f7b" marker-end="url(#f55a)"/>
+      <rect x="650" y="100" width="58" height="48" rx="10" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".4" stroke-dasharray="4 3"/>
+      <text class="sd" x="679" y="120" text-anchor="middle">内存</text>
+      <text class="sd" x="679" y="134" text-anchor="middle">驱逐</text>
+
+      <path class="pipe" d="M660,148 C620,262 280,268 168,164" stroke="#1F8F5F" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#f55g)"/>
+      <text class="sd" x="420" y="248" text-anchor="middle" fill="#1F8F5F" font-weight="600">SendMessage → resumeAgentBackground：从磁盘 transcript 复活，旧上下文全在</text>
+      <text class="ss" x="420" y="282" text-anchor="middle">终态（completed / failed / killed）甚至被驱逐出内存，都挡不住一次续跑</text>
+    </g>
+  </svg>
+  <div class="figure-cap">Worker 状态机的核心特征：所有"结束"都是软的。completed 可以续跑、failed 带着错误现场等修正、killed 也回传部分结果并保留 transcript——真正不可逆的只有磁盘上 transcript 被清理那一刻。</div>
+</div>
+
+<p>终止路径上有两个容易错过的细节，都体现了"信息不浪费"的原则：</p>
+
+<p><strong>被杀的 Worker 也交作业。</strong><code>stopTask</code>（<code>tasks/stopTask.ts</code>）里有一段耐人寻味的区别对待：后台 Bash 被杀时，"exit code 137" 通知被抑制——那是噪音；但 Agent 任务被杀时通知照发，因为它携带 <code>extractPartialResult</code> 从已产生的消息里抢救出的部分结果——那是 payload。你半路叫停一个调研 Worker，它读过的东西不会白读。</p>
+
+<p><strong>批量终止合并汇报。</strong>用户按 ESC 时 <code>killAllRunningAgentTasks</code> 停掉所有 Worker，同时用 <code>markAgentsNotified</code> 把每个任务的 notified 标志直接置位——五个 Worker 不会发五条讣告刷屏，系统发一条聚合消息。去重标志在这里被反向利用：先置位，通知就永远不会发出。</p>
+
+<p>失败处理的策略同样围绕上下文经济学展开：Worker 报告测试失败时，提示词的第一选择是 <strong>SendMessage 续跑同一个 Worker</strong>——它拥有完整的错误现场（改了什么、报了什么错、试过什么），一句"58 行和 72 行的断言还在失败，改成新的报错文案"就够了；只有当续跑再次失败，才换思路新开或上报用户。对照 5.2.3 的决策表，这正是"修正它自己刚犯的错 → 续跑"那一行。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>这个状态机最反直觉的设计是"没有真正的终态"。传统任务系统里 killed 就是死了；这里 kill 只是 abort 掉进程内的循环，<strong>身份（agentId）和记忆（transcript）都在盘上</strong>，SendMessage 一到就原地复活。把"执行"和"身份+记忆"分离之后，停止变得廉价而无损——这是敢于"随手停、随手续"的底气，也间接鼓励协调器大胆派工：派错了就停，成本近乎为零。</p>
+  <p><span class="role">给产品经理</span>ESC 一键全停 + 聚合汇报 + 部分结果保留，这三件事共同回答用户对多 Agent 最深的恐惧："失控了怎么办"。刹车必须比油门显眼，这是自治系统赢得信任的前提。</p>
+</div>
+
+<hr>
+
+<h2>本章代码</h2>
+
+<p>本章的示例在 <code>code/examples/coordinator_demo.py</code>。它在第四章 SubAgent 骨架之上实现了一个迷你协调器：Coordinator 循环用 <code>spawn_worker</code> 异步派生 Worker（立即拿到 task_id），Worker 完成后把 <code>task-notification</code> 投进优先级队列，在 Coordinator 的回合边界注入；<code>send_message</code> 对运行中的 Worker 排队注入、对已完成的 Worker 从 transcript 复活——纯本地模拟，无需 API Key。</p>
+
+<pre><code class="language-python"># 纯本地运行，无需 API Key
+cd code
+uv run python examples/coordinator_demo.py</code></pre>
+
+<p>骨架与源码的对应关系：</p>
+
+<pre><code class="language-text"># coordinator_demo.py 骨架                ←→  src/ 路径
+
+COORDINATOR_SYSTEM_PROMPT                 # getCoordinatorSystemPrompt()
+                                          #   coordinator/coordinatorMode.ts:111
+                                          #   （协调器人格 = 一份提示词）
+
+class NotificationQueue                   # messageQueueManager.ts
+  #   now / next / later 三级优先级       #   enqueuePendingNotification()
+  #   用户输入永不被通知饿死              #   （priority 'later'）
+
+def build_task_notification(...)          # enqueueAgentNotification()
+                                          #   tasks/LocalAgentTask/LocalAgentTask.tsx:197
+                                          #   （XML 构造 + notified 去重）
+
+async def spawn_worker(...)               # AgentTool run_in_background 路径
+                                          #   （立即返回 task_id）
+
+def send_message(to, message)             # SendMessageTool.call()
+  #   running → pending_messages 排队     #   queuePendingMessage()
+  #   终态    → transcript 复活           #   resumeAgentBackground()
+                                          #   tools/AgentTool/resumeAgent.ts:42
+
+WORKER_TOOLS（无 spawn，无 send）          # ASYNC_AGENT_ALLOWED_TOOLS
+                                          #   - INTERNAL_WORKER_TOOLS
+                                          #   constants/tools.ts:55（星形约束）</code></pre>
+
 <div class="page-nav">
   <button class="page-nav-btn" onclick="showPage('ch4')">
     <span class="nav-dir">← 上一章</span>

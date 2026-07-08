@@ -4,14 +4,319 @@
   实现目标：进程崩溃或用户中断后，能从上次中断点恢复，不丢失工作进度。
 </p>
 
-<h2>8.1 Session State 序列化</h2>
-<p>（内容待填）</p>
+<p>写代码写到一半，终端崩了，或者你直接合上电脑走人。第二天敲一句 <code>claude --continue</code>，对话原样回来：聊天记录、改到一半的任务清单、甚至你当时 cd 进去的那个 worktree 目录。凭什么？</p>
 
-<h2>8.2 恢复机制</h2>
-<p>（内容待填）</p>
+<p>第一章埋下的种子在这里收获（一句话回顾：LLM 本身无状态，Agent 的全部状态就是一个只增不减的消息数组）。既然状态只有一个数组，那持久化 = 把数组落盘，恢复 = 把数组读回来——理论上就这么平凡。工程上不平凡的是三个问题：<strong>怎么落</strong>——每一轮都在写，崩在任何一行都不能丢掉前面的；<strong>落成什么形状</strong>——用户会撤销、会分叉、会从任意历史点重开，线性列表装不下这些；<strong>装不下怎么办</strong>——数组只增不减，上下文窗口有硬顶，总有一天塞不进一次 API 调用。</p>
 
-<h2>8.3 Compact 上下文压缩</h2>
-<p>（内容待填）</p>
+<p>本章顺着这三个问题走：8.1 落盘（append-only JSONL 与消息树），8.2 读回（从叶子回走一条链，顺带恢复整个工作环境），8.3 装不下（Compact：让模型给自己写交接文档）。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">架构总图</span>
+    <span class="figure-title">三层存储：磁盘全量、内存工作集、窗口预算 <span class="hint">— 写是 append，读是走链，compact 是换页</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 420" role="img" aria-label="Session 三层存储架构总图">
+    <style>
+      .f8-0 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f8-0 .lt{font-size:12.5px;font-weight:700}
+      .f8-0 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f8-0 .ld{font-size:10.5px;fill:#5a5346}
+      .f8-0 .pipe{stroke-width:1.6;fill:none}
+    </style>
+    <defs>
+      <marker id="f80b" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#2563EB"/></marker>
+      <marker id="f80g" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+      <marker id="f80p" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#6D45C9"/></marker>
+    </defs>
+    <g class="f8-0">
+      <!-- context window -->
+      <rect x="40" y="16" width="640" height="88" rx="12" fill="#FDFCF9" stroke="#6D45C9" stroke-opacity=".5"/>
+      <text class="lt" x="360" y="40" text-anchor="middle" fill="#6D45C9">上下文窗口（每轮发给 API 的部分）</text>
+      <text class="ld" x="360" y="60" text-anchor="middle">硬顶：模型窗口 − 摘要预留 − 缓冲（8.3 的阈值公式）</text>
+      <text class="ls" x="360" y="80" text-anchor="middle">接近阈值 → 自动 compact：换页，不是清空</text>
+
+      <!-- memory -->
+      <rect x="40" y="150" width="640" height="96" rx="12" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="lt" x="360" y="174" text-anchor="middle" fill="#2563EB">内存：messages[]（第一章的那个数组）</text>
+      <text class="ld" x="360" y="194" text-anchor="middle">当前对话的工作集——线性的一条链，模型看到的世界</text>
+      <text class="ls" x="360" y="214" text-anchor="middle">每轮结束 → recordTranscript()：按 UUID 去重后追加落盘</text>
+      <text class="ls" x="360" y="232" text-anchor="middle">崩溃时最多丢"正在写的半行"，之前的全在盘上</text>
+
+      <!-- disk -->
+      <rect x="40" y="292" width="640" height="96" rx="12" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="lt" x="360" y="316" text-anchor="middle" fill="#3a3326">磁盘：~/.claude/projects/{项目}/{sessionId}.jsonl</text>
+      <text class="ld" x="360" y="336" text-anchor="middle">append-only 全量日志：每行一个 Entry，消息 + 元数据混存，只追加从不改写</text>
+      <text class="ls" x="360" y="356" text-anchor="middle">消息靠 parentUuid 连成一棵树（分支 = rewind / fork 的历史）</text>
+      <text class="ls" x="360" y="374" text-anchor="middle">子 Agent 侧链单独落 {sessionId}/subagents/agent-{id}.jsonl</text>
+
+      <!-- arrows -->
+      <path class="pipe" d="M150,150 L150,110" stroke="#6D45C9" marker-end="url(#f80p)"/>
+      <text class="ld" x="158" y="132" fill="#6D45C9">投喂：整条链进窗口</text>
+      <path class="pipe" d="M220,246 L220,286" stroke="#2563EB" marker-end="url(#f80b)"/>
+      <text class="ld" x="228" y="270" fill="#2563EB">写：每轮 append（8.1）</text>
+      <path class="pipe" d="M520,292 L520,252" stroke="#1F8F5F" marker-end="url(#f80g)"/>
+      <text class="ld" x="528" y="274" fill="#1F8F5F">读：resume 从叶子走链（8.2）</text>
+      <path class="pipe" d="M600,104 C640,130 640,220 600,246" stroke="#6D45C9" stroke-dasharray="6 4" marker-end="url(#f80p)"/>
+      <text class="ld" x="648" y="180" fill="#6D45C9">compact</text>
+      <text class="ld" x="648" y="196" fill="#6D45C9">（8.3）</text>
+
+      <text class="ld" x="360" y="410" text-anchor="middle" fill="#C8344E">三层各管一件事：磁盘管"什么都不忘"，内存管"现在聊到哪"，窗口管"模型这轮能看多少"</text>
+    </g>
+  </svg>
+  <div class="figure-cap">Session 系统的全景：内存里的消息数组每轮追加落盘成 JSONL 全量日志；恢复时从树的叶子回走一条链重建数组；数组超出窗口预算时 compact 把工作集换页——磁盘上的历史永远不动。</div>
+</div>
+
+<div class="goal-card">
+  <div class="goal-card-label">本章目标</div>
+  <p>读完这章，你会理解：</p>
+  <ul>
+    <li><span class="sec-no">8.1</span><span>转录文件为什么是 append-only JSONL，消息为什么存成树而不是列表</span></li>
+    <li><span class="sec-no">8.2</span><span><code>--continue</code> 如何从叶子回走重建对话，恢复的为什么不只是消息</span></li>
+    <li><span class="sec-no">8.3</span><span>自动压缩的阈值公式、九段式交接摘要与压缩后的"灾后重建"</span></li>
+  </ul>
+</div>
+
+<h2 id="s8-1">8.1 转录文件——append-only JSONL 与消息树</h2>
+
+<p>先看磁盘上的东西长什么样（<code>utils/sessionStorage.ts</code>，全书最大的单文件之一，约 5100 行）：</p>
+
+<pre><code class="language-text">~/.claude/projects/-Users-you-myapp/       # 项目目录（cwd 转义成目录名）
+  9f3c….jsonl                              # 一个会话 = 一个文件，一行一个 Entry
+  9f3c…/subagents/agent-a1b2.jsonl         # 子 Agent 的侧链转录（第四章的隔离，落盘也隔离）
+
+# 消息 Entry：uuid + parentUuid 把消息连成一棵树
+{"type":"user",     "uuid":"u-17","parentUuid":"a-16","message":{…}}
+{"type":"assistant","uuid":"a-18","parentUuid":"u-17","message":{…}}
+
+# 元数据也是 Entry，混在同一个文件里，同一支笔追加
+{"type":"custom-title","sessionId":"9f3c…","customTitle":"修复登录超时"}
+{"type":"worktree-state","worktreeSession":{…}}    # 你此刻在哪个 worktree
+{"type":"file-history-snapshot", …}                # 文件改动快照（/rewind 的本钱）
+{"type":"mode","mode":"normal"}                    # coordinator / normal</code></pre>
+
+<p>三个设计决定，每个都值得停一下。<strong>第一，只追加，从不改写。</strong>写入口 <code>recordTranscript()</code>（sessionStorage.ts:1408）拿到一批消息后，先按 UUID 对照已落盘集合去重，只把新消息追加到文件尾。好处是崩溃语义简单到极致：进程死在任何时刻，最多废掉正在写的半行 JSON，之前的每一行都完好——不需要 WAL，不需要事务，文件系统的 append 就是事务。去重则让"重复写"无害，调用方不必小心翼翼地记"哪些已经存过了"。</p>
+
+<p><strong>第二，存的是树，不是列表。</strong>每条消息带 <code>parentUuid</code> 指向它的前一条。正常聊天时这是一条直线；但用户 <code>/rewind</code> 回某个历史点重新说话时，新消息的 parentUuid 指向那个历史点——树上长出一根新枝，<strong>旧枝原封不动地留在文件里</strong>。"当前对话"不过是"从某片叶子回走到根的那条链"。撤销、分叉、回放，全都不需要删除任何东西——历史不可变，可变的只是"现在站在哪片叶子上"。</p>
+
+<p><strong>第三，元数据与消息同文件。</strong>标题、模式、worktree 状态、文件快照统统作为 Entry 混在同一个 JSONL 里，而不是旁边放一个 <code>meta.json</code>。一个文件就是一个会话的全部事实，复制走一个文件 = 带走整个会话；更重要的是原子性——不存在"消息文件和元数据文件对不上"这种双文件系统的经典事故。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">机制图</span>
+    <span class="figure-title">消息树：历史不可变，分叉只换叶子 <span class="hint">— 文件里是一棵树，对话是其中一条链</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 330" role="img" aria-label="消息树机制图">
+    <style>
+      .f8-1 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f8-1 .lt{font-size:12px;font-weight:700}
+      .f8-1 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f8-1 .ld{font-size:10px;fill:#5a5346}
+      .f8-1 .pipe{stroke-width:1.6;fill:none}
+      .f8-1 .node{rx:8}
+    </style>
+    <defs>
+      <marker id="f81n" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#9a8f7b"/></marker>
+      <marker id="f81g" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+    </defs>
+    <g class="f8-1">
+      <rect class="node" x="30" y="40" width="110" height="34" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="ls" x="85" y="61" text-anchor="middle">u-1 "修复登录"</text>
+      <rect class="node" x="180" y="40" width="110" height="34" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="ls" x="235" y="61" text-anchor="middle">a-2 读代码…</text>
+      <rect class="node" x="330" y="40" width="110" height="34" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="ls" x="385" y="61" text-anchor="middle">u-3 "改超时"</text>
+
+      <path class="pipe" d="M140,57 L176,57" stroke="#9a8f7b" marker-end="url(#f81n)"/>
+      <path class="pipe" d="M290,57 L326,57" stroke="#9a8f7b" marker-end="url(#f81n)"/>
+
+      <!-- old branch -->
+      <rect class="node" x="480" y="14" width="110" height="34" fill="#FDFCF9" stroke="#9a8f7b" stroke-opacity=".45" stroke-dasharray="4 3"/>
+      <text class="ls" x="535" y="35" text-anchor="middle">a-4 方案 A</text>
+      <rect class="node" x="630" y="14" width="76" height="34" fill="#FDFCF9" stroke="#9a8f7b" stroke-opacity=".45" stroke-dasharray="4 3"/>
+      <text class="ls" x="668" y="35" text-anchor="middle">u-5 …</text>
+      <path class="pipe" d="M440,50 C455,42 465,38 476,33" stroke="#9a8f7b" stroke-dasharray="4 3" marker-end="url(#f81n)"/>
+      <path class="pipe" d="M590,31 L626,31" stroke="#9a8f7b" stroke-dasharray="4 3" marker-end="url(#f81n)"/>
+      <text class="ld" x="592" y="66" text-anchor="middle">旧分支：留在文件里，谁也不删</text>
+
+      <!-- new branch after rewind -->
+      <rect class="node" x="480" y="96" width="110" height="34" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".6"/>
+      <text class="ls" x="535" y="117" text-anchor="middle">a-4' 方案 B</text>
+      <rect class="node" x="630" y="96" width="76" height="34" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".6"/>
+      <text class="ls" x="668" y="117" text-anchor="middle">u-5'</text>
+      <path class="pipe" d="M440,64 C455,80 465,90 476,102" stroke="#1F8F5F" marker-end="url(#f81g)"/>
+      <path class="pipe" d="M590,113 L626,113" stroke="#1F8F5F" marker-end="url(#f81g)"/>
+      <text class="ld" x="560" y="150" text-anchor="middle" fill="#1F8F5F">/rewind 到 u-3 重说 → 长出新枝，叶子 = u-5'</text>
+
+      <!-- file view -->
+      <rect x="30" y="180" width="660" height="112" rx="12" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".5"/>
+      <text class="lt" x="360" y="204" text-anchor="middle" fill="#3a3326">同一棵树在文件里的样子：按写入时间排队，谁先发生谁在前</text>
+      <text class="ls" x="52" y="228">{u-1} {a-2} {u-3} {a-4} {u-5} {custom-title} {a-4'} {u-5'} …</text>
+      <text class="ld" x="52" y="252">树形靠 parentUuid 编码：a-4 和 a-4' 的 parentUuid 都是 u-3——这就是分叉</text>
+      <text class="ld" x="52" y="272">"当前对话" = 从叶子 u-5' 沿 parentUuid 回走到根的那条链（8.2）</text>
+
+      <text class="ld" x="360" y="318" text-anchor="middle" fill="#C8344E">append-only 给的三件套：崩溃安全（半行最多废一行）、可审计（cat 就能看）、时间旅行（历史永远还在）</text>
+    </g>
+  </svg>
+  <div class="figure-cap">rewind/fork 不删除历史，只是让新消息指向旧的分叉点。文件永远只追加；树形结构完全由每行的 parentUuid 编码。当前对话是从某片叶子回走到根的一条链。</div>
+</div>
+
+<p>这就是第一章那句"状态与计算分离"承诺的红利兑现（一句话回顾：模型无状态，状态全在调用方的数组里）：因为状态只是数据，所以它可持久化、可回放、可分叉——换任何一种"状态藏在对象和闭包里"的架构，这三件事每一件都是大工程。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>日志式存储三件事一起白拿：持久化、审计、时间旅行——全部来自"只追加、不改写"这一条纪律。给状态建模时先问一句：<strong>历史需要不可变吗？</strong>需要，就存事件日志而不是最新快照；快照永远可以从日志推出来，反过来不行。</p>
+</div>
+
+<h2 id="s8-2">8.2 恢复机制——从叶子回走一条链</h2>
+
+<p>恢复是落盘的逆运算，核心函数小得出奇（<code>buildConversationChain</code>，sessionStorage.ts:2069）：</p>
+
+<pre><code class="language-typescript">// buildConversationChain —— 精简：从叶子沿 parentUuid 回走到根，再反转
+const transcript: TranscriptMessage[] = []
+const seen = new Set<UUID>()
+let cur: TranscriptMessage | undefined = leafMessage
+while (cur) {
+  if (seen.has(cur.uuid)) break        // 环保护：记录事件，返回部分链
+  seen.add(cur.uuid)
+  transcript.push(cur)
+  cur = cur.parentUuid ? messages.get(cur.parentUuid) : undefined
+}
+transcript.reverse()
+// 补遗 pass：并行工具调用会形成 DAG（N 个 tool_use 兄弟消息共享
+// 一个 message.id），单亲回走只保得住一支——读侧把兄弟找回来
+return recoverOrphanedParallelToolResults(messages, transcript, seen)</code></pre>
+
+<p><strong>存的时候是树，读的时候是链。</strong><code>--continue</code> 取最新的叶子；<code>--resume</code> 弹列表让用户挑（每个会话只读文件尾 16KB 的元数据窗口来显示标题，不必解析整个文件）；<code>--fork-session</code> 则把链复制到一个新 sessionId 下继续——原会话不动，这是会话级的"另存为"。三个入口共享同一条回走逻辑，差别只在"选哪片叶子"和"要不要换身份"。</p>
+
+<p>但只把消息读回来，恢复才完成一半。<code>processResumedConversation</code>（sessionRestore.ts:409）还原的是<strong>整个工作现场</strong>：任务清单不单独存文件，而是从转录里挖——扫描最后一次 <code>TodoWrite</code> 工具调用的入参（<code>extractTodosFromTranscript</code>），转录本身就是数据库；worktree 状态更妙，恢复时直接 <code>process.chdir(worktreePath)</code>，源码注释点破："process.chdir is the TOCTOU-safe existence check"——切目录这个动作同时兼任存在性检查，目录被删了就抛 ENOENT，顺势把状态改记成"已退出"，不需要"先检查再切换"的竞态两步；此外还有 agent 身份与模型覆盖、成本统计、会话标题，逐项归位。</p>
+
+<p>防御性细节也都是生产事故喂出来的：转录读取有 50MB 硬顶（<code>MAX_TRANSCRIPT_READ_BYTES</code>，注释记着案发编号：会话文件能长到数 GB）；大文件在文件描述符层直接跳过 compact 边界之前的字节——峰值内存按<strong>输出</strong>大小分配而不是按文件大小（一个 151MB、84% 是过期快照的会话，加载内存从 316MB 降到 155MB）；回走时的 <code>seen</code> 集合防 parentUuid 成环——文件是外部输入，哪怕是自己写的，读的时候也当不可信数据对待。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>恢复的完整定义是<strong>"用户回来之后，不需要向系统重新解释任何事"</strong>。消息数组只是及格线；真正拉开差距的是环境状态——cwd、任务清单、后台任务、半途的计划。列一张"崩溃前用户拥有什么"的清单，逐项回答两个问题：存在哪？怎么恢复？凡是答不上来的项，就是用户将来要骂的地方。另外注意 Claude Code 的选择：todos 这类"可以从消息推导的状态"就不单独存——<strong>单一事实源，能推导就不冗余</strong>。</p>
+</div>
+
+<h2 id="s8-3">8.3 Compact——模型给自己写交接文档</h2>
+
+<p>数组只增不减，窗口有硬顶，冲突迟早发生。先看什么时候触发（<code>autoCompact.ts</code>）：</p>
+
+<pre><code class="language-text">有效窗口   = 模型上下文窗口 − min(该模型最大输出, 20_000)   # 给摘要留产出空间
+自动压缩线 = 有效窗口 − 13_000                             # AUTOCOMPACT_BUFFER_TOKENS
+警告线     = 压缩线 − 20_000                               # UI 提前亮黄灯
+手动硬顶   = 有效窗口 − 3_000                              # /compact 的最后余地
+
+连续失败 3 次熔断                    # 有会话曾连续重试 3272 次，白烧 25 万次 API 调用/天
+</code></pre>
+
+<p>每个数字都在回答"压缩这件事自己也要花钱"：压缩要调一次模型、产出最多 2 万 token 的摘要，所以阈值必须在真正的硬顶之前留够余量；压缩可能失败（上下文已经大到连"请你总结"这个请求都发不出去），所以有专门的重试策略（掐掉最老的几轮再试）和熔断器。</p>
+
+<p>触发之后，<code>compactConversation()</code>（compact.ts:387）做的事可以概括成一句话：<strong>让模型给"下一个自己"写交接文档</strong>。压缩提示词要求摘要覆盖九个板块——Primary Request and Intent（用户到底要什么）、Key Technical Concepts、Files and Code Sections（动过哪些文件，附关键代码片段）、Errors and Fixes（犯过什么错、用户怎么纠正的）、Problem Solving、All User Messages（用户原话全录）、Pending Tasks、Current Work、Optional Next Step（下一步，必须引用原文防跑偏）。为什么让模型自己写？因为"这 15 万 token 里什么重要"是语义判断——只有正在干活的模型知道哪句用户反馈是转折点、哪次报错是死胡同。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">机制图</span>
+    <span class="figure-title">Compact 前后：换页，不是清空 <span class="hint">— 磁盘全量不动，内存工作集重建</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 400" role="img" aria-label="Compact 前后对比机制图">
+    <style>
+      .f8-3 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f8-3 .lt{font-size:12px;font-weight:700}
+      .f8-3 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f8-3 .ld{font-size:10px;fill:#5a5346}
+      .f8-3 .pipe{stroke-width:1.6;fill:none}
+    </style>
+    <defs>
+      <marker id="f83g" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+    </defs>
+    <g class="f8-3">
+      <!-- before -->
+      <rect x="30" y="16" width="270" height="270" rx="12" fill="#FBEDEF" stroke="#C8344E" stroke-opacity=".45"/>
+      <text class="lt" x="165" y="40" text-anchor="middle" fill="#C8344E">压缩前：~180K token</text>
+      <rect x="50" y="54" width="230" height="30" rx="6" fill="#fff" stroke="#9a8f7b" stroke-opacity=".4"/>
+      <text class="ls" x="165" y="73" text-anchor="middle">几百轮对话 + 工具结果</text>
+      <rect x="50" y="90" width="230" height="30" rx="6" fill="#fff" stroke="#9a8f7b" stroke-opacity=".4"/>
+      <text class="ls" x="165" y="109" text-anchor="middle">读过的 40 个文件的全文</text>
+      <rect x="50" y="126" width="230" height="30" rx="6" fill="#fff" stroke="#9a8f7b" stroke-opacity=".4"/>
+      <text class="ls" x="165" y="145" text-anchor="middle">试错、报错、重试的全过程</text>
+      <rect x="50" y="162" width="230" height="30" rx="6" fill="#fff" stroke="#9a8f7b" stroke-opacity=".4"/>
+      <text class="ls" x="165" y="181" text-anchor="middle">用户的所有反馈</text>
+      <text class="ld" x="165" y="222" text-anchor="middle">超过 自动压缩线 =</text>
+      <text class="ld" x="165" y="238" text-anchor="middle">有效窗口 − 13K</text>
+      <text class="ld" x="165" y="266" text-anchor="middle" fill="#C8344E">再不压，下一轮就发不出去了</text>
+
+      <path class="pipe" d="M300,150 L416,150" stroke="#1F8F5F" marker-end="url(#f83g)"/>
+      <text class="ld" x="358" y="132" text-anchor="middle" fill="#1F8F5F">模型写九段式</text>
+      <text class="ld" x="358" y="146" text-anchor="middle" fill="#1F8F5F">交接文档</text>
+
+      <!-- after -->
+      <rect x="420" y="16" width="270" height="270" rx="12" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="lt" x="555" y="40" text-anchor="middle" fill="#1F8F5F">压缩后：换上的新工作集</text>
+      <rect x="440" y="54" width="230" height="28" rx="6" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ls" x="555" y="72" text-anchor="middle">compact boundary（分界标记）</text>
+      <rect x="440" y="88" width="230" height="28" rx="6" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ls" x="555" y="106" text-anchor="middle">九段式摘要（≤20K）</text>
+      <rect x="440" y="122" width="230" height="42" rx="6" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ls" x="555" y="140" text-anchor="middle">灾后重建：最近 5 个文件重读</text>
+      <text class="ls" x="555" y="156" text-anchor="middle">（总预算 50K，单文件 5K）</text>
+      <rect x="440" y="170" width="230" height="42" rx="6" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ls" x="555" y="188" text-anchor="middle">plan 文件 + plan 模式提醒 +</text>
+      <text class="ls" x="555" y="204" text-anchor="middle">用过的 skills + 工具清单重播</text>
+      <rect x="440" y="218" width="230" height="28" rx="6" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ls" x="555" y="236" text-anchor="middle">SessionStart('compact') 钩子输出</text>
+      <text class="ld" x="555" y="270" text-anchor="middle">模型醒来：读交接文档，接着干</text>
+
+      <!-- disk -->
+      <rect x="30" y="310" width="660" height="52" rx="12" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="ld" x="360" y="332" text-anchor="middle">磁盘 JSONL：压缩前的全部消息原样还在；boundary 的 parentUuid=null 掐断链——</text>
+      <text class="ld" x="360" y="348" text-anchor="middle">下次 --continue 从 boundary 起步，旧史不进内存但永远可查（加载器甚至在 fd 层跳过它们）</text>
+
+      <text class="ld" x="360" y="388" text-anchor="middle" fill="#C8344E">压缩杀死的不是记忆，是工作集——所以重建工作集（重读文件、重播工具清单）是压缩体验的一半</text>
+    </g>
+  </svg>
+  <div class="figure-cap">Compact 用一次模型调用把 180K 的历史换成 20K 的交接文档，再按预算重建工作集：重读最近碰过的文件、恢复计划与技能上下文、重播工具清单。转录文件不删任何东西，boundary 只是让"当前对话"从新页开始。</div>
+</div>
+
+<p>图右侧的<strong>灾后重建</strong>是最容易被忽略、又最影响体验的一半。摘要写完后上下文被清空，模型对文件系统的"工作记忆"（<code>readFileState</code>）也没了——不重建的话，它醒来第一件事就是把刚才读过的文件挨个重读一遍，压缩省下的 token 立刻还回去。所以 compact 之后自动重注入：最近读过/改过的至多 5 个文件（总预算 50K token、单文件 5K）、进行中的 plan 文件、plan 模式提醒（不然模型压缩完就忘了自己在 plan 模式里）、用过的 skills，以及把工具/Agent/MCP 清单对"空历史"重播一遍——第二章的增量通告机制（一句话回顾：工具清单只在变化时以 delta 附件通告）在空历史上 diff，天然等于全量重播，一行特殊代码都不用加。</p>
+
+<p>全量压缩之外还有两档更轻的手段，构成一个梯度：<strong>microcompact</strong> 不调模型，直接把老的工具结果原地替换成一行 <code>[Old tool result content cleared]</code>——只清 Read/Bash/Grep 这类<strong>可再生</strong>的内容（想要随时能重跑），保留最近 N 个；再往下沉是 <strong>API 侧的 context editing</strong>（<code>clear_thinking</code> / <code>clear_tool_uses</code> 策略），擦除动作直接发生在服务端。三档的成本阶梯很清晰：先擦可再生的（免费），再摘要不可再生的（一次模型调用），实在不行才掐头截断（有损）——每一层都比下一层便宜，也都比下一层保真。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>上下文管理的正确心智模型是<strong>操作系统的换页</strong>：磁盘（转录）保全量，内存（窗口）只装工作集，压缩是把冷页换出、按需换回（重读文件）。两个可直接抄的决定：摘要让模型自己写（重要性是语义判断），压缩后必须重建工作集（否则省下的 token 会被重读吃回去）。</p>
+  <p><span class="role">给产品经理</span>压缩应该在阈值前无感发生，留给用户的感知面只有一条状态：上下文余量。警告线、压缩线、硬顶三级设计的本质是：<strong>永远不让用户撞上"发不出去"的那堵墙</strong>——撞墙一次，用户对长对话的信任就清零一次。</p>
+</div>
+
+<hr>
+
+<h2>本章代码</h2>
+
+<p>本章的示例在 <code>code/examples/session_demo.py</code>。它在临时目录里实现一个迷你 Session 系统：append-only JSONL 落盘（UUID 去重）、parentUuid 消息树与 rewind 分叉、从叶子回走的恢复（含 todos 挖掘）、以及带 boundary 的 compact 换页——纯本地运行，无需 API Key。</p>
+
+<pre><code class="language-python"># 纯本地运行，无需 API Key
+cd code
+uv run python examples/session_demo.py</code></pre>
+
+<p>骨架与源码的对应关系：</p>
+
+<pre><code class="language-text"># session_demo.py 骨架                    ←→  src/ 路径
+
+def record(messages)                      # recordTranscript()：UUID 去重后追加
+                                          #   utils/sessionStorage.ts:1408
+def load(path)                            # loadTranscriptFile()：JSONL → Map
+                                          #   utils/sessionStorage.ts:3472
+def build_chain(messages, leaf)           # buildConversationChain()：叶子回走+反转
+  #   seen 集合防环                       #   utils/sessionStorage.ts:2069
+def resume(path)                          # processResumedConversation()：
+  #   选叶子 → 走链 → 挖 todos            #   utils/sessionRestore.ts:409
+def rewind(from_uuid)                     # 分叉：新消息 parentUuid 指向历史点，
+                                          #   旧枝留在文件里
+def compact(messages)                     # compactConversation()：摘要 + boundary
+  #   boundary.parentUuid = None 掐链     #   services/compact/compact.ts:387
+阈值公式 / 灾后重建常量                    # autoCompact.ts:62 + compact.ts:122</code></pre>
 
 <div class="page-nav">
   <button class="page-nav-btn" onclick="showPage('ch7')">

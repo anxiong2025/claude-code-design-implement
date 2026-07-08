@@ -882,9 +882,11 @@
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showPage('ch7')">7.1 权限模式</a>
-        <a class="nav-section" onclick="showPage('ch7')">7.2 工具许可列表</a>
-        <a class="nav-section" onclick="showPage('ch7')">7.3 中止信号传播</a>
+        <a class="nav-section" onclick="showSection('ch7','s7-1')">7.1 判定流水线——顺序即安全语义</a>
+        <a class="nav-section" onclick="showSection('ch7','s7-2')">7.2 规则语言——Tool(specifier)</a>
+        <a class="nav-section" onclick="showSection('ch7','s7-3')">7.3 权限模式——改默认值不改规则</a>
+        <a class="nav-section" onclick="showSection('ch7','s7-4')">7.4 弹窗之后——写回与钩子边界</a>
+        <a class="nav-section" onclick="showSection('ch7','s7-5')">7.5 中止信号——Esc 的树形传播</a>
       </div>
     </div>
 
@@ -894,9 +896,9 @@
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showPage('ch8')">8.1 Session State 序列化</a>
-        <a class="nav-section" onclick="showPage('ch8')">8.2 恢复机制</a>
-        <a class="nav-section" onclick="showPage('ch8')">8.3 Compact 上下文压缩</a>
+        <a class="nav-section" onclick="showSection('ch8','s8-1')">8.1 转录文件——append-only 消息树</a>
+        <a class="nav-section" onclick="showSection('ch8','s8-2')">8.2 恢复机制——从叶子回走</a>
+        <a class="nav-section" onclick="showSection('ch8','s8-3')">8.3 Compact——交接摘要与重建</a>
       </div>
     </div>
 
@@ -1205,7 +1207,7 @@
             <div class="toc-dot"><div class="toc-dot-inner"></div></div>
             <div class="toc-body">
               <div class="toc-chapter-title">第七章 · 权限与安全</div>
-              <div class="toc-chapter-desc">权限模式 · 工具许可列表 · 中止信号传播</div>
+              <div class="toc-chapter-desc">判定流水线 · 规则小语言 · 五种模式 · 弹窗与钩子 · 中止传播</div>
             </div>
           </div>
 
@@ -1213,7 +1215,7 @@
             <div class="toc-dot"><div class="toc-dot-inner"></div></div>
             <div class="toc-body">
               <div class="toc-chapter-title">第八章 · Session 持久化与恢复</div>
-              <div class="toc-chapter-desc">State 序列化 · 恢复机制 · Compact 压缩</div>
+              <div class="toc-chapter-desc">append-only 转录 · 消息树与恢复 · Compact 交接摘要</div>
             </div>
           </div>
 
@@ -2764,8 +2766,6 @@ return { reason: 'prompt_too_long' }</code></pre>
   实现目标：Agent 能调 Bash、读写文件等多种工具，且读操作并发、写操作串行，互不干扰。
 </p>
 
-<h2>引言 · 一个矛盾</h2>
-
 <p>模型在同一轮里发出三个工具调用——<code>Read("src/query.ts")</code>、<code>Grep("isConcurrencySafe")</code>、<code>Edit("src/Tool.ts", ...)</code>。全部串行执行，慢；全部并发执行，两个读操作没问题，但 Edit 与任何同时进行的写操作相撞，结果就是损坏的文件。这就是工具系统的核心矛盾：<strong>最大化并发（速度）× 保证写操作互斥（正确）</strong>。</p>
 
 <p>Claude Code 的解法不是一把大锁，也不是让工具各自管理锁，而是把决策拆成两半：<strong>工具只声明属性，调度器只执行策略</strong>。每个工具通过 <code>isConcurrencySafe</code> 谓词在定义阶段声明"我能不能与别人并发"，调度器据此在运行时把一组调用<strong>分批（partition）</strong>——连续的只读工具合并成并发批次，每个写工具独占一个串行批次。两者互不知晓对方的存在，却共同构成正确的执行计划。</p>
@@ -3497,11 +3497,9 @@ async def all(generators, cap) → ...       # all()
   实现目标：主 Agent 能派出 SubAgent 并行干活，SubAgent 看不到父 Agent 的历史，结果干净返回。
 </p>
 
-<h2>引言 · 把循环装进工具里</h2>
+<p>让 Agent 在大型代码库里查一个问题，它可能要读几十个文件、产生几百 KB 的中间结果，而最终有用的结论往往只有二十行。麻烦在于，主 Agent 的上下文窗口是整个系统里最稀缺的资源——如果这些搜索过程全发生在它的窗口里，窗口很快被"过程噪音"塞满，触发压缩、丢失早期信息。Claude Code 的解法是派一个"临时工"替它去干脏活，这就是本章的主角 SubAgent。SubAgent 的本质是一个<strong>一次性的、可丢弃的上下文窗口</strong>——把高体积低价值的"过程"隔离在子窗口里烧掉，只把低体积高价值的"结论"带回父窗口。这笔账，本书称之为<strong>上下文经济学</strong>。</p>
 
-<p>第一章建立了 Agent 的最小结构：一个消息数组 + 一个 while 循环 + 一组工具。本章只需要一个递归转折就能推出全部内容：<strong>循环本身也可以被包装成一个工具</strong>。Claude Code 里的 <code>Agent</code> 工具（源码里叫 AgentTool）就是这么一个东西——它的 <code>call()</code> 方法内部跑的不是一段函数逻辑，而是一个完整的、全新的 <code>query()</code> 循环。父 Agent 调用它，就像调用 Read 或 Bash 一样自然；区别只是这个"工具"的执行过程本身又是一个会思考、会调工具的 Agent。</p>
-
-<p>为什么需要这层递归？答案是<strong>上下文经济学</strong>。父 Agent 的上下文窗口是整个系统里最稀缺的资源：在大型代码库里搜索一个问题，可能要读几十个文件、产生几百 KB 的中间结果，而最终有用的结论往往只有二十行。如果这些搜索过程全发生在父 Agent 的窗口里，窗口很快被"过程噪音"塞满，触发压缩、丢失早期信息。SubAgent 的本质是一个<strong>一次性的、可丢弃的上下文窗口</strong>——把高体积低价值的"过程"隔离在子窗口里烧掉，只把低体积高价值的"结论"带回父窗口。</p>
+<p>实现这个"临时工"几乎不需要任何新机器，只需要一个递归转折。第一章建立过 Agent 的最小结构（一句话回顾：一个消息数组 + 一个 while 循环 + 一组工具），而<strong>循环本身也可以被包装成一个工具</strong>。Claude Code 里的 <code>Agent</code> 工具（源码里叫 AgentTool）就是这么一个东西——它的 <code>call()</code> 方法内部跑的不是一段函数逻辑，而是一个完整的、全新的 <code>query()</code> 循环。父 Agent 调用它，就像调用 Read 或 Bash 一样自然；区别只是这个"工具"的执行过程本身又是一个会思考、会调工具的 Agent。</p>
 
 <div class="figure">
   <div class="figure-head">
@@ -4153,9 +4151,7 @@ spawn_agent 工具（is_concurrency_safe）  # AgentTool.call()
   实现目标：一个 Coordinator 同时管多个 Worker，Worker 异步汇报结果，Coordinator 综合后再派新任务。
 </p>
 
-<h2>引言 · 一份提示词，不是一个框架</h2>
-
-<p>第四章末尾留了一个悬念：异步派发（一句话回顾——<code>run_in_background: true</code> 让派生调用立即返回 <code>task_id</code>，子 Agent 的结果在完成后以 <code>task-notification</code> 的形式注入父的后续轮次）给了父 Agent "不等"的能力。但"不等"只是机制，真正的问题是：当三五个 Worker 同时在后台干活、结果乱序抵达时，<strong>谁来拆解任务、消化结果、决定下一步</strong>？主 Agent 的人格必须变——从亲自动手的工程师，变成带团队的 Tech Lead。</p>
+<p>给主 Agent 一个大任务："项目里三个互不依赖的模块，各重构一遍。"三份活完全可以同时干，而"同时"的机制第四章已经给了——异步派发（一句话回顾：<code>run_in_background: true</code> 让派生调用立即返回 <code>task_id</code>，子 Agent 的结果在完成后以 <code>task-notification</code> 的形式注入父的后续轮次）。但机制解决不了管理问题：当三五个 Worker 同时在后台干活、结果乱序抵达时，<strong>谁来拆解任务、消化结果、决定下一步</strong>？主 Agent 的人格必须变——从亲自动手的工程师，变成带团队的 Tech Lead。这个新人格，就是本章的主角：协调器（Coordinator）。</p>
 
 <p>Claude Code 对这个问题的回答出人意料地"薄"。翻开源码你会发现，协调器模式没有引入任何新的执行引擎：<code>coordinator/coordinatorMode.ts</code> 全文约 370 行，其中<strong>约 250 行是一个模板字符串——协调器的系统提示词</strong>。剩下的是一个环境变量开关和一段"告诉协调器 Worker 有哪些工具"的上下文注入。派生复用第四章的 AgentTool，追加指令复用 SendMessage 工具，停止复用 TaskStop 工具。<strong>协调器不是一个类，是一份提示词。</strong>这是本章最重要的一课：多 Agent 编排的复杂度大头在提示词工程，不在代码。</p>
 
@@ -4901,11 +4897,11 @@ WORKER_TOOLS（无 spawn，无 send）          # ASYNC_AGENT_ALLOWED_TOOLS
   实现目标：任意 Agent 可以给另一个 Agent 发消息，接收方可以阻塞等待，也可以非阻塞轮询。
 </p>
 
-<h2>引言 · 当星形不够用——把队列搬到磁盘上</h2>
+<p>想象这样一个场景：你开了三个终端窗口，每个窗口里跑着一个<strong>独立的 Claude Code</strong>——一个当领队，负责分工和验收；两个当队友，各自埋头改一个模块。领队想提醒队友 ada："utils 目录 bob 正在改，你先别碰。"这句话怎么送过去？要知道这是三个互不相识的操作系统进程：不共享内存，不知道彼此的端口和 PID，甚至不知道对方此刻还活着没有。这正是 Claude Code 团队模式（Agent Teams / Swarm）每时每刻要面对的通信问题，也是本章要解决的问题。</p>
 
-<p>第五章的协调器有一个隐含前提：所有 Worker 都活在<strong>同一个进程里</strong>。SendMessage 往运行中的 Worker 投递消息，本质是往同一份内存里的 <code>pendingMessages</code> 数组 push 一项——这在单进程内天经地义，可一旦跨出进程边界就全部失效。而 Claude Code 的团队模式（Agent Teams / Swarm）恰恰要跨：领队在一个终端里，队友各自是<strong>独立的 Claude Code 进程</strong>，跑在 tmux 的不同窗格里，互相看不见对方的内存、端口、PID。</p>
+<p>第五章的协调器从来不用操心这件事，因为那是"一个进程里的多 Agent"：Coordinator 和 Worker 全都活在同一个 Node 进程中，所谓"发消息"（SendMessage 工具），本质是往同一份内存里的 <code>pendingMessages</code> 数组 push 一项。没读过第五章也不要紧，只需记住这个对比：<strong>单进程内传话，就是改一块共享内存</strong>。可团队模式里每个成员都是独立进程，跑在 tmux（终端分屏工具）的不同窗格里——共享内存这条路，彻底断了。</p>
 
-<p>两个互不相识的进程要通信，工程上的标准答案是 socket、HTTP、消息队列。Claude Code 选了一个"土"得多的方案：<strong>每人一只 JSON 文件当信箱，写信加锁追加，收信定时轮询</strong>。土，但仔细掂量会发现它精确匹配了这个场景的每一项需求——本章就从这只文件信箱出发，一路讲到跑在它上面的高层协议：权限跨进程转授、计划审批、优雅关机。你会再次看到第五章的规律：<strong>传输层越简单，语义越容易做对；复杂度应该住在协议层，而协议大半是提示词和 JSON 约定</strong>。</p>
+<p>两个互不相识的进程要通信，工程上的标准答案是 socket、HTTP、消息队列。Claude Code 选了一个"土"得多的方案：<strong>每人一只 JSON 文件当信箱，写信加锁追加，收信定时轮询</strong>。土，但仔细掂量会发现它精确匹配了这个场景的每一项需求——本章就从这只文件信箱出发，一路讲到跑在它上面的高层协议：权限跨进程转授、计划审批、优雅关机。你会再次看到第五章出现过的规律：<strong>传输层越简单，语义越容易做对；复杂度应该住在协议层，而协议大半是提示词和 JSON 约定</strong>。</p>
 
 <div class="figure">
   <div class="figure-head">
@@ -5369,12 +5365,435 @@ shutdown 三步握手                          # sendShutdownRequestToMailbox +
 <p class="chapter-subtitle">
   实现目标：不同场景下工具的使用需要不同级别的授权，SubAgent 不能越权操作。
 </p>
-<h2>7.1 权限模式</h2>
-<p>（内容待填）</p>
-<h2>7.2 工具许可列表</h2>
-<p>（内容待填）</p>
-<h2>7.3 中止信号传播</h2>
-<p>（内容待填）</p>
+
+<p>Agent 干活的每一步都是一次工具调用：读文件、跑测试、改代码、删目录。现在问一个绕不开的问题——模型发出了 <code>rm -rf build/</code>，执行，还是不执行？每一步都弹窗问用户，三五个回合之后用户必然烦到点下"全部允许"，安全归零；从来不问，一条幻觉出来的 <code>rm -rf ~</code> 就是不可逆的灾难。权限系统要做的，是在"烦"和"险"之间造出一个精确的调节器——这是所有 Agent 产品都绕不开的设计题。</p>
+
+<p>Claude Code 的答案是一条<strong>判定流水线</strong>：每个工具调用在执行前穿过一串顺序固定的关卡——PreToolUse 钩子、deny 规则、工具自查、安全检查、权限模式、allow 规则——在任何一关得出结论就立即离开流水线；走完全程仍无结论的，一律去问用户。无论多复杂的场景，系统最终只输出三个词之一：<strong>allow、deny、ask</strong>。这条流水线的主干在 <code>utils/permissions/permissions.ts</code>（约 1500 行），但触角伸得很远：Bash 一个工具的命令匹配就有 2600 行（<code>bashPermissions.ts</code>），文件路径判定又是约 1500 行（<code>filesystem.ts</code>）——权限是 Claude Code 里代码密度最高的子系统之一，因为它是唯一一个"判断错一次就可能不可逆"的子系统。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">架构总图</span>
+    <span class="figure-title">权限判定流水线：一次工具调用的旅程 <span class="hint">— 否决类关卡永远排在豁免类关卡之前</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 500" role="img" aria-label="权限判定流水线架构总图">
+    <style>
+      .f7-0 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f7-0 .lt{font-size:12px;font-weight:700}
+      .f7-0 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f7-0 .ld{font-size:10.5px;fill:#5a5346}
+      .f7-0 .pipe{stroke-width:1.6;fill:none}
+    </style>
+    <defs>
+      <marker id="f70n" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#9a8f7b"/></marker>
+      <marker id="f70r" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#C8344E"/></marker>
+      <marker id="f70g" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+      <marker id="f70a" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#B45309"/></marker>
+    </defs>
+    <g class="f7-0">
+      <rect x="150" y="12" width="270" height="34" rx="9" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="ls" x="285" y="33" text-anchor="middle">模型发出 tool_use：Bash("rm -rf build/")</text>
+
+      <path class="pipe" d="M285,46 L285,62" stroke="#9a8f7b" marker-end="url(#f70n)"/>
+      <rect x="120" y="66" width="330" height="34" rx="8" fill="#FDFCF9" stroke="#6D45C9" stroke-opacity=".5"/>
+      <text class="ld" x="285" y="87" text-anchor="middle">① PreToolUse 钩子表态（allow / deny / ask / 沉默）</text>
+
+      <path class="pipe" d="M285,100 L285,116" stroke="#9a8f7b" marker-end="url(#f70n)"/>
+      <rect x="120" y="120" width="330" height="34" rx="8" fill="#FBEDEF" stroke="#C8344E" stroke-opacity=".5"/>
+      <text class="ld" x="285" y="141" text-anchor="middle">② deny 规则：整个工具被禁 → 立即拒绝</text>
+
+      <path class="pipe" d="M285,154 L285,170" stroke="#9a8f7b" marker-end="url(#f70n)"/>
+      <rect x="120" y="174" width="330" height="46" rx="8" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="ld" x="285" y="192" text-anchor="middle">③ 工具自查 tool.checkPermissions()</text>
+      <text class="ls" x="285" y="208" text-anchor="middle">Bash 拆子命令逐个判 · 文件工具判路径（7.2）</text>
+
+      <path class="pipe" d="M285,220 L285,236" stroke="#9a8f7b" marker-end="url(#f70n)"/>
+      <rect x="120" y="240" width="330" height="46" rx="8" fill="#FBEDEF" stroke="#C8344E" stroke-opacity=".5"/>
+      <text class="ld" x="285" y="258" text-anchor="middle">④ 豁免免疫区：内容级 ask 规则 · 交互工具 ·</text>
+      <text class="ld" x="285" y="274" text-anchor="middle">安全检查（.git/ .claude/ shell 配置）→ 必须问</text>
+
+      <path class="pipe" d="M285,286 L285,302" stroke="#9a8f7b" marker-end="url(#f70n)"/>
+      <rect x="120" y="306" width="330" height="34" rx="8" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="ld" x="285" y="327" text-anchor="middle">⑤ 权限模式：bypassPermissions → 全放行；dontAsk → 问变拒</text>
+
+      <path class="pipe" d="M285,340 L285,356" stroke="#9a8f7b" marker-end="url(#f70n)"/>
+      <rect x="120" y="360" width="330" height="34" rx="8" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="ld" x="285" y="381" text-anchor="middle">⑥ allow 规则：整个工具被放行 → 允许</text>
+
+      <path class="pipe" d="M285,394 L285,410" stroke="#9a8f7b" marker-end="url(#f70n)"/>
+      <rect x="120" y="414" width="330" height="34" rx="8" fill="#FDF6EC" stroke="#B45309" stroke-opacity=".55"/>
+      <text class="ld" x="285" y="435" text-anchor="middle">⑦ 兜底：没有结论（passthrough）→ 一律转成 ask</text>
+
+      <rect x="560" y="120" width="140" height="42" rx="9" fill="#FBEDEF" stroke="#C8344E" stroke-opacity=".6"/>
+      <text class="lt" x="630" y="138" text-anchor="middle" fill="#C8344E">deny</text>
+      <text class="ls" x="630" y="154" text-anchor="middle">拒绝理由回给模型</text>
+      <rect x="560" y="306" width="140" height="42" rx="9" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".6"/>
+      <text class="lt" x="630" y="324" text-anchor="middle" fill="#1F8F5F">allow</text>
+      <text class="ls" x="630" y="340" text-anchor="middle">执行工具</text>
+      <rect x="560" y="414" width="140" height="42" rx="9" fill="#FDF6EC" stroke="#B45309" stroke-opacity=".6"/>
+      <text class="lt" x="630" y="432" text-anchor="middle" fill="#B45309">ask</text>
+      <text class="ls" x="630" y="448" text-anchor="middle">弹窗队列 / 跨进程转发</text>
+
+      <path class="pipe" d="M450,137 L556,139" stroke="#C8344E" marker-end="url(#f70r)"/>
+      <path class="pipe" d="M450,263 C510,263 530,300 556,320" stroke="#B45309" stroke-dasharray="5 4" marker-end="url(#f70a)"/>
+      <path class="pipe" d="M450,323 L556,325" stroke="#1F8F5F" marker-end="url(#f70g)"/>
+      <path class="pipe" d="M450,377 C500,377 520,340 556,330" stroke="#1F8F5F" marker-end="url(#f70g)"/>
+      <path class="pipe" d="M450,431 L556,433" stroke="#B45309" marker-end="url(#f70a)"/>
+
+      <text class="ld" x="285" y="478" text-anchor="middle" fill="#C8344E">顺序即安全语义：deny（②）永远先于 bypass（⑤）——任何模式都翻不了用户的否决票</text>
+      <text class="ls" x="285" y="494" text-anchor="middle">hasPermissionsToUseToolInner() · utils/permissions/permissions.ts:1158</text>
+    </g>
+  </svg>
+  <div class="figure-cap">一次工具调用的完整判定旅程。流水线在任何一关得出 allow/deny 即短路退出；④ 里的三类"豁免免疫"判断即使在 bypassPermissions 模式下也必须弹窗。走完全程仍无结论的调用，兜底一律是 ask——fail-closed。</div>
+</div>
+
+<div class="goal-card">
+  <div class="goal-card-label">本章目标</div>
+  <p>读完这章，你会理解：</p>
+  <ul>
+    <li><span class="sec-no">7.1</span><span>一次工具调用要过几道关卡，顺序为什么本身就是安全语义</span></li>
+    <li><span class="sec-no">7.2</span><span><code>Tool(specifier)</code> 规则小语言：前缀、通配符与复合命令的一票否决</span></li>
+    <li><span class="sec-no">7.3</span><span>五种权限模式如何改变"默认答案"而不豁免规则</span></li>
+    <li><span class="sec-no">7.4</span><span>ask 之后：弹窗队列、"总是允许"的写回、钩子的权限边界</span></li>
+    <li><span class="sec-no">7.5</span><span>Esc 按下之后：中止信号如何传遍整棵 Agent 树而不留悬空状态</span></li>
+  </ul>
+</div>
+
+<h2 id="s7-1">7.1 判定流水线——顺序即安全语义</h2>
+
+<p>先看主干代码的骨架。<code>hasPermissionsToUseToolInner</code> 一共九步，编号是源码注释里的原编号：</p>
+
+<pre><code class="language-typescript">// hasPermissionsToUseToolInner —— 精简（permissions.ts:1158）
+if (context.abortController.signal.aborted) throw new AbortError()  // 入口先查中止（7.5）
+
+// 1a. 整个工具被 deny 规则禁用             → deny，游戏结束
+// 1b. 整个工具有 ask 规则                 → ask（可被沙箱自动放行的 Bash 例外）
+// 1c. 问工具自己：tool.checkPermissions(parsedInput, context)
+//     Bash 拆子命令逐条判，文件工具判路径（7.2）
+// 1d. 工具自查说 deny                     → deny
+// 1e. 工具要求人机交互（AskUserQuestion）   → ask，bypass 模式也拦
+// 1f. 内容级 ask 规则（Bash(npm publish:*)）→ ask，bypass 模式也拦
+// 1g. 安全检查（.git/ .claude/ shell 配置） → ask，bypass 模式也拦
+
+// 2a. bypassPermissions 模式              → allow
+// 2b. 整个工具被 allow 规则放行            → allow
+
+// 3. 走到这里还没有结论（passthrough）      → 一律转成 ask
+return { ...toolPermissionResult, behavior: 'ask' }</code></pre>
+
+<p>这段代码最重要的信息不在任何一行里，而在<strong>行与行的顺序</strong>里。三个设计判断值得逐个展开：</p>
+
+<p><strong>为什么 deny（1a）排在 bypass（2a）之前？</strong>因为 deny 规则是用户亲手写下的否决票——"这个工具永远不许碰"。bypassPermissions 豁免的是"默认要问"的麻烦，不能豁免"用户明说不行"的禁令。把否决判断放在豁免判断之前，"切到 bypass 模式赶进度"就永远不会误伤你 deny 掉的生产数据库。顺序颠倒一下，整个安全模型就塌了——这就是"顺序即语义"。</p>
+
+<p><strong>为什么 1e/1f/1g 三类 ask 也排在 bypass 之前？</strong>它们是三种"豁免免疫"：用户显式配置的内容级 ask 规则（源码注释："This must be respected even in bypass mode, just as deny rules are respected"）；天生需要人回答的交互工具；以及<strong>安全检查</strong>——对 <code>.git/</code>、<code>.claude/</code>、shell 配置文件这类路径的写入。最后一类保护的其实是权限系统自己：settings.json 里存着规则，钩子脚本开机即运行，改一行，下次启动时整个权限系统就被架空了。<strong>看门人可以放行任何人，唯独不能让人改门锁。</strong></p>
+
+<p><strong>为什么兜底（3）是 ask 不是 allow？</strong>任何一关都没表态的调用，说明它不在任何已知的安全清单里——未知即危险，fail-closed。第三章 <code>buildTool</code> 见过同款哲学（一句话回顾：工具不声明 <code>isConcurrencySafe</code> 就按"不可并发"处理，宁可慢不可错）。权限这里是：宁可多问一次，不可放过一次。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>权限判定的正确形状是一条<strong>有序短路链</strong>：否决类判断在最前，豁免类判断在中间，兜底分支永远保守。审计一个权限系统不必读完实现，先把它的判定顺序表画出来，找"有没有一条路径能绕过否决"——找到即漏洞。Claude Code 把三类"bypass 也拦"的判断显式排在 bypass 之前，这个顺序本身就是可以被单元测试锁死的安全属性。</p>
+</div>
+
+<h2 id="s7-2">7.2 规则语言——Tool(specifier) 与复合命令</h2>
+
+<p>流水线里反复出现的"规则"长什么样？它是一门刻意保持简单的小语言，格式只有两种：<code>Tool</code>（管整个工具）和 <code>Tool(content)</code>（管这个工具的某类输入）：</p>
+
+<pre><code class="language-typescript">// 规则字符串 → 结构化规则（permissionRuleParser.ts:93）
+'Bash'                         → { toolName: 'Bash' }               // 整个工具
+'Bash(npm install)'            → { …, ruleContent: 'npm install' }  // 精确一条命令
+'Bash(npm:*)'                  → 前缀匹配：npm 开头的一切
+'Bash(git diff *)'             → 通配符匹配（* 转成正则 .*）
+'Read(~/.ssh/**)'              → 文件工具：路径 glob
+'Bash(python -c "print\(1\)")' → 括号转义后精确匹配
+
+// 通配符里的一个讲究（shellRuleMatching.ts:143）——
+// 'git *' 的尾部通配是可选的：既匹配 'git add'，也匹配裸 'git'，
+// 与前缀规则 'git:*' 的语义对齐；多通配模式（'* run *'）不享受此待遇
+if (regexPattern.endsWith(' .*') && unescapedStarCount === 1) {
+  regexPattern = regexPattern.slice(0, -3) + '( .*)?'
+}</code></pre>
+
+<p>每条规则挂一个行为（allow / ask / deny）和一个<strong>来源</strong>。来源共八层：五层设置文件（<code>userSettings</code> 用户全局、<code>projectSettings</code> 项目共享、<code>localSettings</code> 项目本地不入库、<code>flagSettings</code> 命令行 <code>--settings</code>、<code>policySettings</code> 管理员托管），加三个运行时源（<code>cliArg</code>、<code>command</code>、<code>session</code> 本次会话）。关键的设计选择是：<strong>来源不决定优先级，行为才决定优先级</strong>——所有来源的规则摊平后统一按 deny → ask → allow 的顺序查（7.1 的 1a/1b/2b），一条 session 级的 deny 照样压过 userSettings 里的 allow。来源真正决定的是两件事：规则展示时标注"来自哪里"，以及用户点"总是允许"时新规则写回哪个文件。</p>
+
+<p>最难的部分在 Bash。一条 <code>cd src && npm test > out.log</code> 怎么判？答案是<strong>拆开来，逐个判，一票否决</strong>：</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">机制图</span>
+    <span class="figure-title">复合命令的判定：拆分 → 逐个匹配 → 最严的说了算 <span class="hint">— 全 allow 才 allow，一个 deny 即 deny</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 330" role="img" aria-label="复合命令判定机制图">
+    <style>
+      .f7-2 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f7-2 .lt{font-size:12px;font-weight:700}
+      .f7-2 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f7-2 .ld{font-size:10.5px;fill:#5a5346}
+      .f7-2 .pipe{stroke-width:1.5;fill:none}
+    </style>
+    <defs>
+      <marker id="f72n" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#9a8f7b"/></marker>
+      <marker id="f72a" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#B45309"/></marker>
+    </defs>
+    <g class="f7-2">
+      <rect x="180" y="14" width="360" height="34" rx="9" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="ls" x="360" y="35" text-anchor="middle">Bash("cd src && npm test > out.log")</text>
+
+      <path class="pipe" d="M280,48 C220,66 180,74 160,92" stroke="#9a8f7b" marker-end="url(#f72n)"/>
+      <path class="pipe" d="M440,48 C500,66 540,74 560,92" stroke="#9a8f7b" marker-end="url(#f72n)"/>
+      <text class="ld" x="360" y="72" text-anchor="middle">拆分子命令（最多 50 个），剥离输出重定向再展示</text>
+
+      <rect x="40" y="96" width="240" height="104" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="ls" x="160" y="118" text-anchor="middle">子命令①  cd src</text>
+      <text class="ld" x="56" y="140">对规则集匹配：</text>
+      <text class="ls" x="56" y="158">Bash(cd:*)  allow  ✓ 前缀命中</text>
+      <text class="ld" x="56" y="180">→ 这一段：allow</text>
+
+      <rect x="440" y="96" width="240" height="104" rx="10" fill="#FDF6EC" stroke="#B45309" stroke-opacity=".55"/>
+      <text class="ls" x="560" y="118" text-anchor="middle">子命令②  npm test</text>
+      <text class="ld" x="456" y="140">对规则集匹配：</text>
+      <text class="ls" x="456" y="158">exact / prefix / wildcard 均未命中</text>
+      <text class="ld" x="456" y="180">→ 这一段：ask</text>
+
+      <path class="pipe" d="M160,200 C200,236 280,248 340,252" stroke="#9a8f7b" marker-end="url(#f72n)"/>
+      <path class="pipe" d="M560,200 C520,236 440,248 380,252" stroke="#B45309" marker-end="url(#f72a)"/>
+
+      <rect x="180" y="240" width="360" height="48" rx="10" fill="#FDFCF9" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="ld" x="360" y="260" text-anchor="middle">聚合（subcommandResults）：任一 deny → deny；</text>
+      <text class="ld" x="360" y="276" text-anchor="middle">否则有 ask → ask，弹窗只列出没过关的那几段</text>
+
+      <text class="ls" x="360" y="316" text-anchor="middle">"The following parts require approval: npm test" · bashPermissions.ts（约 2600 行）</text>
+    </g>
+  </svg>
+  <div class="figure-cap">复合命令按连接符拆成子命令逐个判定，聚合时取最严结果。弹窗上用户看到的是"哪几段没过关"，而不是笼统的"这条命令需要审批"——精确到段，用户才只为真正的风险付注意力。</div>
+</div>
+
+<p>拆分-聚合之外，Bash 匹配还有一批对抗性的细节：判定前剥掉注释行和 <code>timeout</code> 这类"安全包装"（<code>stripSafeWrappers</code>），防止危险命令靠伪装混过前缀匹配；<code>LD_*</code>/<code>DYLD_*</code>/<code>PATH</code> 开头的环境变量赋值被单独盯防（<code>BINARY_HIJACK_VARS</code>），因为它们能把后面任何"无害命令"劫持成任意代码。还有一层<strong>防呆</strong>：<code>Bash(python:*)</code> 这样的 allow 规则看似具体，实则等于放行任意代码执行——<code>dangerousPatterns.ts</code> 维护了一张解释器/包运行器/远程执行的前缀清单（python、node、npx、bash、ssh……），这类过宽规则在进入自动化程度更高的模式时会被主动剥除。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>权限规则是一门小语言，它最重要的设计约束不是表达力，而是<strong>必须能从一次对话里长出来</strong>：用户点"总是允许"的瞬间，系统要能自动生成一条宽窄合适的规则（精确命令 → 精确规则，带参命令 → <code>prefix:*</code> 规则）。规则语言越花哨，自动生成越容易出错。</p>
+  <p><span class="role">给产品经理</span>"看似具体、实则放行一切"的规则（<code>python:*</code>、<code>ssh:*</code>）是权限系统的暗门，值得像 Claude Code 一样维护一张危险前缀清单主动拦截——用户自己很难意识到 <code>npx:*</code> 和 <code>*</code> 是等价的。</p>
+</div>
+
+<h2 id="s7-3">7.3 权限模式——改默认值，不改规则</h2>
+
+<p>规则管的是"这一条输入"，模式管的是<strong>整个会话的姿态</strong>。五个档位（<code>PermissionMode.ts</code>）：</p>
+
+<pre><code class="language-text">default            规则说了算，规则没意见就问用户
+acceptEdits        工作目录内的文件写操作免弹窗（filesystem.ts:1366 的快速通道），
+                   Bash、目录外写入照常要问
+plan               只读调研，动手前先交计划——约束主要在提示词层（见下）
+bypassPermissions  规则之外全放行；deny/ask 规则、安全检查、交互工具依然拦（7.1）
+dontAsk            "问 = 拒"：无人值守场景，宁可失败也不挂起等一个不存在的人
+
+用户侧切换：Shift+Tab 循环 default → acceptEdits → plan →（bypass 如可用）→ default
+                                     （getNextPermissionMode.ts:34）</code></pre>
+
+<p>五个档位里有两个值得拆开看。<strong>plan 模式</strong>是权限系统里最"薄"的一档：它几乎不改判定流水线，主要靠一条每轮注入的 <code>plan_mode</code> 附件提醒模型"现在是调研阶段，别动手"，加上一个专门的出口——<code>ExitPlanMode</code> 工具把"开始动手"变成一次显式的用户审批。第五章的规律再次出现（一句话回顾：协调器不是一个类，是一份提示词）：<strong>约束能放在提示词层就不放在代码层</strong>，因为"什么算调研、什么算动手"本身是语义判断。代码层只补两个硬细节：进 plan 前如果在 bypass 模式，<code>isBypassPermissionsModeAvailable</code> 会记住它，批准计划后无缝恢复（permissions.ts:1270）；plan 文件本身永远可写（<code>checkEditableInternalPath</code>）——不然模型连计划都写不出来。</p>
+
+<p><strong>bypassPermissions</strong> 则是被看管最严的一档：管理员可以通过 <code>policySettings</code> 让它整体不可用；服务端还有一个远程熔断开关（<code>bypassPermissionsKillswitch.ts</code>），在第一次查询前检查一次，必要时把整个会话降回受控模式。至于 <code>dontAsk</code> 的"问变拒"，实现位置很讲究——它在外层包装函数的<strong>最末尾</strong>做转换（permissions.ts:503），注释解释了原因："This is done at the end so it can't be bypassed by early returns"。转换放在入口，任何一条提前 return 的路径都可能漏掉它；放在出口，无论走哪条路径都逃不过。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>模式和规则是正交的两层：<strong>模式改"没规则时的默认答案"，规则改"这一条的例外"，且规则永远赢</strong>。这个分层让"临时切 bypass 赶进度"是安全的——你的 deny 规则还在。设计自己的系统时警惕把两层揉在一起的诱惑（"bypass 就是全放行嘛"），那会让每次切模式都变成一次全量安全审计。</p>
+  <p><span class="role">给产品经理</span>档位是给用户的信任度旋钮，但旋钮拧到头也要保留几条不可豁免的红线（安全检查、显式 ask 规则）。用户会手滑、会忘记自己在哪个模式——红线是产品替用户兜的底。</p>
+</div>
+
+<h2 id="s7-4">7.4 弹窗之后——批准、写回与钩子的边界</h2>
+
+<p>流水线输出 ask 之后发生什么？<code>useCanUseTool</code>（useCanUseTool.tsx）接手，按运行形态把这个"问题"路由到三条去路：</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">机制图</span>
+    <span class="figure-title">ask 的三条去路与"总是允许"的写回 <span class="hint">— 弹窗是入口，规则文件是出口</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 340" role="img" aria-label="ask 三条去路机制图">
+    <style>
+      .f7-4 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f7-4 .lt{font-size:12px;font-weight:700}
+      .f7-4 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f7-4 .ld{font-size:10px;fill:#5a5346}
+      .f7-4 .pipe{stroke-width:1.5;fill:none}
+    </style>
+    <defs>
+      <marker id="f74n" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#9a8f7b"/></marker>
+      <marker id="f74g" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+    </defs>
+    <g class="f7-4">
+      <rect x="290" y="14" width="140" height="38" rx="10" fill="#FDF6EC" stroke="#B45309" stroke-opacity=".6"/>
+      <text class="lt" x="360" y="38" text-anchor="middle" fill="#B45309">behavior: ask</text>
+
+      <path class="pipe" d="M300,52 C220,70 160,80 130,102" stroke="#9a8f7b" marker-end="url(#f74n)"/>
+      <path class="pipe" d="M360,52 L360,102" stroke="#9a8f7b" marker-end="url(#f74n)"/>
+      <path class="pipe" d="M420,52 C500,70 560,80 590,102" stroke="#9a8f7b" marker-end="url(#f74n)"/>
+
+      <rect x="20" y="106" width="220" height="120" rx="10" fill="#FDFCF9" stroke="#6D45C9" stroke-opacity=".5"/>
+      <text class="lt" x="130" y="128" text-anchor="middle" fill="#6D45C9">① 协调器代审</text>
+      <text class="ls" x="130" y="146" text-anchor="middle">coordinatorHandler</text>
+      <text class="ld" x="36" y="168">awaitAutomatedChecksBeforeDialog：</text>
+      <text class="ld" x="36" y="184">先等自动检查跑完，能代批的</text>
+      <text class="ld" x="36" y="200">不打扰用户，代不了的落到③</text>
+
+      <rect x="250" y="106" width="220" height="120" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="lt" x="360" y="128" text-anchor="middle" fill="#1F8F5F">② swarm 队友转发</text>
+      <text class="ls" x="360" y="146" text-anchor="middle">swarmWorkerHandler</text>
+      <text class="ld" x="266" y="168">第六章的权限瞬移：请求写进</text>
+      <text class="ld" x="266" y="184">领队信箱，弹窗出现在用户</text>
+      <text class="ld" x="266" y="200">正在看的屏幕上，响应原路写回</text>
+
+      <rect x="480" y="106" width="220" height="120" rx="10" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="lt" x="590" y="128" text-anchor="middle" fill="#2563EB">③ 本地弹窗</text>
+      <text class="ls" x="590" y="146" text-anchor="middle">ToolUseConfirmQueue</text>
+      <text class="ld" x="496" y="168">一次一个出队弹窗：命令高亮、</text>
+      <text class="ld" x="496" y="184">编辑 diff 视图；用户四选一：</text>
+      <text class="ld" x="496" y="200">拒绝 / 允许一次 / 改了再批 / 总是允许</text>
+
+      <path class="pipe" d="M590,226 L590,252" stroke="#1F8F5F" marker-end="url(#f74g)"/>
+      <rect x="450" y="256" width="250" height="52" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".55"/>
+      <text class="ld" x="575" y="276" text-anchor="middle">"总是允许" → suggestions（PermissionUpdate）</text>
+      <text class="ls" x="575" y="294" text-anchor="middle">写回 session / localSettings / userSettings</text>
+
+      <text class="ld" x="230" y="276" text-anchor="middle" fill="#C8344E">同一次弹窗既解决当下，也消灭同类的未来弹窗——</text>
+      <text class="ld" x="230" y="294" text-anchor="middle" fill="#C8344E">权限系统从对话中学习，7.2 的规则就是这么长出来的</text>
+    </g>
+  </svg>
+  <div class="figure-cap">ask 按运行形态路由：协调器场景先让自动检查代审；swarm 队友把请求转发到领队屏幕（第六章的信箱协议）；本地则进弹窗队列。用户点"总是允许"时，附带的规则建议被持久化——下次同类调用直接在 7.1 的 2b 步放行。</div>
+</div>
+
+<p>弹窗上的四个选项里藏着两个产品级细节。<strong>"修改后允许"</strong>：用户可以直接编辑命令再批准，修改后的输入通过 <code>updatedInput</code> 一路替换到工具执行——不必"拒绝、口头纠正、等模型重试"绕一大圈。<strong>"总是允许"</strong>：ask 决策附带 <code>suggestions</code>（一组 <code>PermissionUpdate</code>），用户勾选即写回对应的设置文件。deny 同样有讲究：拒绝理由（<code>decisionReason</code>）会变成一条给模型看的消息（<code>createPermissionRequestMessage</code>），模型知道"为什么被拒"，才能换一条合规的路走，而不是原地重试。</p>
+
+<p>最后是钩子。PreToolUse 钩子在权限判定<strong>之前</strong>运行（toolExecution.ts:800），它可以表态 allow/deny/ask，也可以只修改输入。它的权限边界由 <code>resolveHookPermissionDecision</code>（toolHooks.ts:332）一锤定音：</p>
+
+<pre><code class="language-typescript">// resolveHookPermissionDecision —— 精简（toolHooks.ts:332）
+// 源码注释：hook 'allow' does NOT bypass settings.json deny/ask rules
+
+if (hook.behavior === 'allow') {
+  const ruleCheck = await checkRuleBasedPermissions(tool, input, ctx)
+  if (ruleCheck === null)            return hook       // 跳过弹窗，直接执行
+  if (ruleCheck.behavior === 'deny') return ruleCheck  // deny 规则压过钩子
+  return await canUseTool(...)                         // ask 规则：照样弹窗
+}
+if (hook.behavior === 'deny') return hook              // 钩子的否决立即生效
+// 钩子说 ask 或沉默 → 走正常流水线（带上钩子给的理由进弹窗）</code></pre>
+
+<p>注意这个不对称：钩子的 <strong>deny 立即生效，allow 却要再过一遍规则</strong>。钩子是用户写的自动化脚本，它有资格替用户拒绝（拒绝永远安全），但无权替用户推翻用户自己写的 deny/ask 规则——两个"用户的意志"冲突时，显式配置的规则赢过运行时的脚本。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span><strong>钩子是自动化的用户，不是超级用户</strong>：任何自动批准通道（钩子、AI 代审、CI 机器人）的权限上限必须等于它代替的那个人，且永远低于显式否决。校验方法同 7.1——找"这条通道能不能绕过 deny"。</p>
+  <p><span class="role">给产品经理</span>弹窗的价值密度取决于"总是允许"的设计：一次弹窗应该顺手消灭一类未来弹窗，否则你是在训练用户无脑点确认——权限疲劳的终点是权限失效。</p>
+</div>
+
+<h2 id="s7-5">7.5 中止信号——Esc 如何传遍整棵 Agent 树</h2>
+
+<p>权限管"能不能开始"，中止管"能不能停下"。用户按下 Esc，此刻可能有一个模型请求在流式返回、三个工具在并发执行、一个 SubAgent 在深处调研、还有一个权限弹窗挂着等回答——全都要停，而且停完之后对话还得是合法状态、还能继续聊。Claude Code 用一件标准武器解决：<code>AbortController</code>，但用法有讲究。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">机制图</span>
+    <span class="figure-title">中止信号的树形传播 <span class="hint">— 单向下行：父停子必停，子停不连累父</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 380" role="img" aria-label="中止信号树形传播机制图">
+    <style>
+      .f7-5 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f7-5 .lt{font-size:12px;font-weight:700}
+      .f7-5 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f7-5 .ld{font-size:10px;fill:#5a5346}
+      .f7-5 .pipe{stroke-width:1.6;fill:none}
+    </style>
+    <defs>
+      <marker id="f75r" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#C8344E"/></marker>
+    </defs>
+    <g class="f7-5">
+      <rect x="14" y="20" width="180" height="44" rx="10" fill="#FBEDEF" stroke="#C8344E" stroke-opacity=".6"/>
+      <text class="lt" x="104" y="38" text-anchor="middle" fill="#C8344E">用户按下 Esc</text>
+      <text class="ls" x="104" y="56" text-anchor="middle">controller.abort()</text>
+
+      <path class="pipe" d="M194,42 L266,42" stroke="#C8344E" marker-end="url(#f75r)"/>
+
+      <rect x="270" y="20" width="200" height="44" rx="10" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="ld" x="370" y="38" text-anchor="middle">本回合的 AbortController</text>
+      <text class="ls" x="370" y="56" text-anchor="middle">一回合一个，下回合是新的</text>
+
+      <path class="pipe" d="M320,64 C250,100 200,110 170,132" stroke="#C8344E" marker-end="url(#f75r)"/>
+      <path class="pipe" d="M370,64 L370,132" stroke="#C8344E" marker-end="url(#f75r)"/>
+      <path class="pipe" d="M420,64 C490,100 540,110 570,132" stroke="#C8344E" marker-end="url(#f75r)"/>
+
+      <rect x="60" y="136" width="200" height="82" rx="10" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="lt" x="160" y="156" text-anchor="middle" fill="#2563EB">流式模型请求</text>
+      <text class="ld" x="76" y="176">SDK 收到 signal 即断流，</text>
+      <text class="ld" x="76" y="192">query 循环在流边界检查，</text>
+      <text class="ld" x="76" y="208">返回 aborted_streaming</text>
+
+      <rect x="280" y="136" width="180" height="82" rx="10" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="lt" x="370" y="156" text-anchor="middle" fill="#2563EB">执行中的工具</text>
+      <text class="ld" x="296" y="176">Bash 杀子进程；</text>
+      <text class="ld" x="296" y="192">canUseTool 入口抛 AbortError；</text>
+      <text class="ld" x="296" y="208">挂着的权限弹窗自动收回</text>
+
+      <rect x="480" y="136" width="220" height="82" rx="10" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="lt" x="590" y="156" text-anchor="middle" fill="#2563EB">同步 SubAgent</text>
+      <text class="ld" x="496" y="176">直接共享父的 controller</text>
+      <text class="ld" x="496" y="192">（runAgent.ts:527），Esc 一次，</text>
+      <text class="ld" x="496" y="208">整棵树全停</text>
+
+      <rect x="480" y="238" width="220" height="64" rx="10" fill="#FDFCF9" stroke="#9a8f7b" stroke-opacity=".55" stroke-dasharray="5 4"/>
+      <text class="lt" x="590" y="258" text-anchor="middle" fill="#3a3326">异步 SubAgent：故意不链</text>
+      <text class="ld" x="496" y="278">后台任务有独立 controller，</text>
+      <text class="ld" x="496" y="294">生死由 TaskStop 单独管（第四章）</text>
+
+      <rect x="60" y="238" width="400" height="64" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".55"/>
+      <text class="lt" x="260" y="258" text-anchor="middle" fill="#1F8F5F">善后：为每个悬空 tool_use 合成 tool_result</text>
+      <text class="ls" x="260" y="278" text-anchor="middle">"Interrupted by user" · yieldMissingToolResultBlocks</text>
+      <text class="ld" x="260" y="294" text-anchor="middle">对话仍是合法状态——用户下一句话接着聊，无需重开会话</text>
+
+      <text class="ld" x="360" y="340" text-anchor="middle" fill="#C8344E">传播是单向的：createChildAbortController 用 WeakRef 挂父子——父 abort 传给子，子 abort 不上传，</text>
+      <text class="ld" x="360" y="358" text-anchor="middle" fill="#C8344E">且任何一方被 GC 都不泄漏监听器（长会话里 controller 成千上万，这不是洁癖是刚需）</text>
+    </g>
+  </svg>
+  <div class="figure-cap">中止信号从回合级 AbortController 单向下行：断流、杀进程、收弹窗、停同步子树；异步 SubAgent 故意不在传播树上。最关键的一步是善后——为悬空的 tool_use 合成配对的 tool_result，保住 API 协议不变量。</div>
+</div>
+
+<p>整套机制里最值得学的是<strong>善后</strong>这一步。第一章讲过 API 的硬性协议（一句话回顾：每个 <code>tool_use</code> 块必须有一个配对的 <code>tool_result</code> 块，以 user 角色注入下一轮）。用户在工具跑到一半时按 Esc，消息数组里就留下了没有结果的 <code>tool_use</code>——这个状态是<strong>不合法</strong>的，直接拿去调 API 会报错。所以 query 循环中止后做的第一件事，是给每个悬空的 <code>tool_use</code> 合成一条 <code>"Interrupted by user"</code> 的 tool_result（query.ts:1015 起的中止处理），再补一条 <code>[Request interrupted by user]</code> 的用户消息。代价是几行合成代码，换来的是：<strong>中止不是会话的死刑，只是一个回合的句号</strong>——用户下一句话可以直接接着聊。</p>
+
+<p>另一个容易被低估的决定是<strong>作用域</strong>：AbortController 是回合级的（REPL 每个回合新建一个），不是会话级的。中止是"取消这一次"，不是"关掉这一切"——作用域选错，Esc 就从"后悔药"变成了"自毁按钮"。而同步与异步 SubAgent 的区别对待（共享 vs 独立 controller）延续了第四章的语义（一句话回顾：<code>run_in_background: true</code> 的派发即刻返回 <code>task_id</code>，后台独立运行）：同步派生是父任务的一部分，父停子必停；异步派生是独立的后台任务，它的生死应该由显式的 TaskStop 管理，而不是被父回合的 Esc 连坐。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>"取消"要当成协议特性设计，不是异常处理，三条铁律：<strong>①信号单向下行</strong>（子的失败不该炸掉父）；<strong>②每个挂起点都注册响应</strong>（模型流、工具进程、权限弹窗——漏一个就有"停不下来"的角落）；<strong>③中止后的状态必须仍然合法</strong>（合成 tool_result）。市面上"一按停止就只能重开会话"的 Agent，九成是丢了第③条。</p>
+</div>
+
+<hr>
+
+<h2>本章代码</h2>
+
+<p>本章的示例在 <code>code/examples/permissions_demo.py</code>。它实现一条迷你判定流水线：规则解析与三种匹配、复合命令的拆分聚合、五种模式、钩子的权限边界（hook allow 压不过 deny 规则）、以及回合级中止的树形传播与 tool_result 善后——纯本地运行，无需 API Key。</p>
+
+<pre><code class="language-python"># 纯本地运行，无需 API Key
+cd code
+uv run python examples/permissions_demo.py</code></pre>
+
+<p>骨架与源码的对应关系：</p>
+
+<pre><code class="language-text"># permissions_demo.py 骨架                 ←→  src/ 路径
+
+def parse_rule(rule_str)                   # permissionRuleValueFromString()
+                                           #   utils/permissions/permissionRuleParser.ts:93
+def match_command(rule, cmd)               # parsePermissionRule + matchWildcardPattern
+  #   exact / prefix(:*) / wildcard        #   utils/permissions/shellRuleMatching.ts
+def check_bash(cmd, rules)                 # bashToolCheckPermission：拆子命令、
+  #   拆分 → 逐段判 → 一票否决             #   逐段判定、subcommandResults 聚合
+def check_tool(tool, input, mode, rules)   # hasPermissionsToUseToolInner()
+  #   1a deny → … → 2a bypass → 3 ask      #   utils/permissions/permissions.ts:1158
+def resolve_hook_decision(hook, ...)       # resolveHookPermissionDecision()
+  #   hook allow 仍要过 deny/ask 规则      #   services/tools/toolHooks.ts:332
+class AbortController + 子树传播           # createChildAbortController()（WeakRef 版）
+  #   合成 "Interrupted by user"           #   utils/abortController.ts + query.ts:1015</code></pre>
+
 <div class="page-nav">
   <button class="page-nav-btn" onclick="showPage('ch6')">
     <span class="nav-dir">← 上一章</span>
@@ -5393,12 +5812,321 @@ shutdown 三步握手                          # sendShutdownRequestToMailbox +
 <p class="chapter-subtitle">
   实现目标：进程崩溃或用户中断后，能从上次中断点恢复，不丢失工作进度。
 </p>
-<h2>8.1 Session State 序列化</h2>
-<p>（内容待填）</p>
-<h2>8.2 恢复机制</h2>
-<p>（内容待填）</p>
-<h2>8.3 Compact 上下文压缩</h2>
-<p>（内容待填）</p>
+
+<p>写代码写到一半，终端崩了，或者你直接合上电脑走人。第二天敲一句 <code>claude --continue</code>，对话原样回来：聊天记录、改到一半的任务清单、甚至你当时 cd 进去的那个 worktree 目录。凭什么？</p>
+
+<p>第一章埋下的种子在这里收获（一句话回顾：LLM 本身无状态，Agent 的全部状态就是一个只增不减的消息数组）。既然状态只有一个数组，那持久化 = 把数组落盘，恢复 = 把数组读回来——理论上就这么平凡。工程上不平凡的是三个问题：<strong>怎么落</strong>——每一轮都在写，崩在任何一行都不能丢掉前面的；<strong>落成什么形状</strong>——用户会撤销、会分叉、会从任意历史点重开，线性列表装不下这些；<strong>装不下怎么办</strong>——数组只增不减，上下文窗口有硬顶，总有一天塞不进一次 API 调用。</p>
+
+<p>本章顺着这三个问题走：8.1 落盘（append-only JSONL 与消息树），8.2 读回（从叶子回走一条链，顺带恢复整个工作环境），8.3 装不下（Compact：让模型给自己写交接文档）。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">架构总图</span>
+    <span class="figure-title">三层存储：磁盘全量、内存工作集、窗口预算 <span class="hint">— 写是 append，读是走链，compact 是换页</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 420" role="img" aria-label="Session 三层存储架构总图">
+    <style>
+      .f8-0 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f8-0 .lt{font-size:12.5px;font-weight:700}
+      .f8-0 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f8-0 .ld{font-size:10.5px;fill:#5a5346}
+      .f8-0 .pipe{stroke-width:1.6;fill:none}
+    </style>
+    <defs>
+      <marker id="f80b" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#2563EB"/></marker>
+      <marker id="f80g" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+      <marker id="f80p" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#6D45C9"/></marker>
+    </defs>
+    <g class="f8-0">
+      <!-- context window -->
+      <rect x="40" y="16" width="640" height="88" rx="12" fill="#FDFCF9" stroke="#6D45C9" stroke-opacity=".5"/>
+      <text class="lt" x="360" y="40" text-anchor="middle" fill="#6D45C9">上下文窗口（每轮发给 API 的部分）</text>
+      <text class="ld" x="360" y="60" text-anchor="middle">硬顶：模型窗口 − 摘要预留 − 缓冲（8.3 的阈值公式）</text>
+      <text class="ls" x="360" y="80" text-anchor="middle">接近阈值 → 自动 compact：换页，不是清空</text>
+
+      <!-- memory -->
+      <rect x="40" y="150" width="640" height="96" rx="12" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="lt" x="360" y="174" text-anchor="middle" fill="#2563EB">内存：messages[]（第一章的那个数组）</text>
+      <text class="ld" x="360" y="194" text-anchor="middle">当前对话的工作集——线性的一条链，模型看到的世界</text>
+      <text class="ls" x="360" y="214" text-anchor="middle">每轮结束 → recordTranscript()：按 UUID 去重后追加落盘</text>
+      <text class="ls" x="360" y="232" text-anchor="middle">崩溃时最多丢"正在写的半行"，之前的全在盘上</text>
+
+      <!-- disk -->
+      <rect x="40" y="292" width="640" height="96" rx="12" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="lt" x="360" y="316" text-anchor="middle" fill="#3a3326">磁盘：~/.claude/projects/{项目}/{sessionId}.jsonl</text>
+      <text class="ld" x="360" y="336" text-anchor="middle">append-only 全量日志：每行一个 Entry，消息 + 元数据混存，只追加从不改写</text>
+      <text class="ls" x="360" y="356" text-anchor="middle">消息靠 parentUuid 连成一棵树（分支 = rewind / fork 的历史）</text>
+      <text class="ls" x="360" y="374" text-anchor="middle">子 Agent 侧链单独落 {sessionId}/subagents/agent-{id}.jsonl</text>
+
+      <!-- arrows -->
+      <path class="pipe" d="M150,150 L150,110" stroke="#6D45C9" marker-end="url(#f80p)"/>
+      <text class="ld" x="158" y="132" fill="#6D45C9">投喂：整条链进窗口</text>
+      <path class="pipe" d="M220,246 L220,286" stroke="#2563EB" marker-end="url(#f80b)"/>
+      <text class="ld" x="228" y="270" fill="#2563EB">写：每轮 append（8.1）</text>
+      <path class="pipe" d="M520,292 L520,252" stroke="#1F8F5F" marker-end="url(#f80g)"/>
+      <text class="ld" x="528" y="274" fill="#1F8F5F">读：resume 从叶子走链（8.2）</text>
+      <path class="pipe" d="M600,104 C640,130 640,220 600,246" stroke="#6D45C9" stroke-dasharray="6 4" marker-end="url(#f80p)"/>
+      <text class="ld" x="648" y="180" fill="#6D45C9">compact</text>
+      <text class="ld" x="648" y="196" fill="#6D45C9">（8.3）</text>
+
+      <text class="ld" x="360" y="410" text-anchor="middle" fill="#C8344E">三层各管一件事：磁盘管"什么都不忘"，内存管"现在聊到哪"，窗口管"模型这轮能看多少"</text>
+    </g>
+  </svg>
+  <div class="figure-cap">Session 系统的全景：内存里的消息数组每轮追加落盘成 JSONL 全量日志；恢复时从树的叶子回走一条链重建数组；数组超出窗口预算时 compact 把工作集换页——磁盘上的历史永远不动。</div>
+</div>
+
+<div class="goal-card">
+  <div class="goal-card-label">本章目标</div>
+  <p>读完这章，你会理解：</p>
+  <ul>
+    <li><span class="sec-no">8.1</span><span>转录文件为什么是 append-only JSONL，消息为什么存成树而不是列表</span></li>
+    <li><span class="sec-no">8.2</span><span><code>--continue</code> 如何从叶子回走重建对话，恢复的为什么不只是消息</span></li>
+    <li><span class="sec-no">8.3</span><span>自动压缩的阈值公式、九段式交接摘要与压缩后的"灾后重建"</span></li>
+  </ul>
+</div>
+
+<h2 id="s8-1">8.1 转录文件——append-only JSONL 与消息树</h2>
+
+<p>先看磁盘上的东西长什么样（<code>utils/sessionStorage.ts</code>，全书最大的单文件之一，约 5100 行）：</p>
+
+<pre><code class="language-text">~/.claude/projects/-Users-you-myapp/       # 项目目录（cwd 转义成目录名）
+  9f3c….jsonl                              # 一个会话 = 一个文件，一行一个 Entry
+  9f3c…/subagents/agent-a1b2.jsonl         # 子 Agent 的侧链转录（第四章的隔离，落盘也隔离）
+
+# 消息 Entry：uuid + parentUuid 把消息连成一棵树
+{"type":"user",     "uuid":"u-17","parentUuid":"a-16","message":{…}}
+{"type":"assistant","uuid":"a-18","parentUuid":"u-17","message":{…}}
+
+# 元数据也是 Entry，混在同一个文件里，同一支笔追加
+{"type":"custom-title","sessionId":"9f3c…","customTitle":"修复登录超时"}
+{"type":"worktree-state","worktreeSession":{…}}    # 你此刻在哪个 worktree
+{"type":"file-history-snapshot", …}                # 文件改动快照（/rewind 的本钱）
+{"type":"mode","mode":"normal"}                    # coordinator / normal</code></pre>
+
+<p>三个设计决定，每个都值得停一下。<strong>第一，只追加，从不改写。</strong>写入口 <code>recordTranscript()</code>（sessionStorage.ts:1408）拿到一批消息后，先按 UUID 对照已落盘集合去重，只把新消息追加到文件尾。好处是崩溃语义简单到极致：进程死在任何时刻，最多废掉正在写的半行 JSON，之前的每一行都完好——不需要 WAL，不需要事务，文件系统的 append 就是事务。去重则让"重复写"无害，调用方不必小心翼翼地记"哪些已经存过了"。</p>
+
+<p><strong>第二，存的是树，不是列表。</strong>每条消息带 <code>parentUuid</code> 指向它的前一条。正常聊天时这是一条直线；但用户 <code>/rewind</code> 回某个历史点重新说话时，新消息的 parentUuid 指向那个历史点——树上长出一根新枝，<strong>旧枝原封不动地留在文件里</strong>。"当前对话"不过是"从某片叶子回走到根的那条链"。撤销、分叉、回放，全都不需要删除任何东西——历史不可变，可变的只是"现在站在哪片叶子上"。</p>
+
+<p><strong>第三，元数据与消息同文件。</strong>标题、模式、worktree 状态、文件快照统统作为 Entry 混在同一个 JSONL 里，而不是旁边放一个 <code>meta.json</code>。一个文件就是一个会话的全部事实，复制走一个文件 = 带走整个会话；更重要的是原子性——不存在"消息文件和元数据文件对不上"这种双文件系统的经典事故。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">机制图</span>
+    <span class="figure-title">消息树：历史不可变，分叉只换叶子 <span class="hint">— 文件里是一棵树，对话是其中一条链</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 330" role="img" aria-label="消息树机制图">
+    <style>
+      .f8-1 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f8-1 .lt{font-size:12px;font-weight:700}
+      .f8-1 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f8-1 .ld{font-size:10px;fill:#5a5346}
+      .f8-1 .pipe{stroke-width:1.6;fill:none}
+      .f8-1 .node{rx:8}
+    </style>
+    <defs>
+      <marker id="f81n" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#9a8f7b"/></marker>
+      <marker id="f81g" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+    </defs>
+    <g class="f8-1">
+      <rect class="node" x="30" y="40" width="110" height="34" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="ls" x="85" y="61" text-anchor="middle">u-1 "修复登录"</text>
+      <rect class="node" x="180" y="40" width="110" height="34" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="ls" x="235" y="61" text-anchor="middle">a-2 读代码…</text>
+      <rect class="node" x="330" y="40" width="110" height="34" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="ls" x="385" y="61" text-anchor="middle">u-3 "改超时"</text>
+
+      <path class="pipe" d="M140,57 L176,57" stroke="#9a8f7b" marker-end="url(#f81n)"/>
+      <path class="pipe" d="M290,57 L326,57" stroke="#9a8f7b" marker-end="url(#f81n)"/>
+
+      <!-- old branch -->
+      <rect class="node" x="480" y="14" width="110" height="34" fill="#FDFCF9" stroke="#9a8f7b" stroke-opacity=".45" stroke-dasharray="4 3"/>
+      <text class="ls" x="535" y="35" text-anchor="middle">a-4 方案 A</text>
+      <rect class="node" x="630" y="14" width="76" height="34" fill="#FDFCF9" stroke="#9a8f7b" stroke-opacity=".45" stroke-dasharray="4 3"/>
+      <text class="ls" x="668" y="35" text-anchor="middle">u-5 …</text>
+      <path class="pipe" d="M440,50 C455,42 465,38 476,33" stroke="#9a8f7b" stroke-dasharray="4 3" marker-end="url(#f81n)"/>
+      <path class="pipe" d="M590,31 L626,31" stroke="#9a8f7b" stroke-dasharray="4 3" marker-end="url(#f81n)"/>
+      <text class="ld" x="592" y="66" text-anchor="middle">旧分支：留在文件里，谁也不删</text>
+
+      <!-- new branch after rewind -->
+      <rect class="node" x="480" y="96" width="110" height="34" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".6"/>
+      <text class="ls" x="535" y="117" text-anchor="middle">a-4' 方案 B</text>
+      <rect class="node" x="630" y="96" width="76" height="34" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".6"/>
+      <text class="ls" x="668" y="117" text-anchor="middle">u-5'</text>
+      <path class="pipe" d="M440,64 C455,80 465,90 476,102" stroke="#1F8F5F" marker-end="url(#f81g)"/>
+      <path class="pipe" d="M590,113 L626,113" stroke="#1F8F5F" marker-end="url(#f81g)"/>
+      <text class="ld" x="560" y="150" text-anchor="middle" fill="#1F8F5F">/rewind 到 u-3 重说 → 长出新枝，叶子 = u-5'</text>
+
+      <!-- file view -->
+      <rect x="30" y="180" width="660" height="112" rx="12" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".5"/>
+      <text class="lt" x="360" y="204" text-anchor="middle" fill="#3a3326">同一棵树在文件里的样子：按写入时间排队，谁先发生谁在前</text>
+      <text class="ls" x="52" y="228">{u-1} {a-2} {u-3} {a-4} {u-5} {custom-title} {a-4'} {u-5'} …</text>
+      <text class="ld" x="52" y="252">树形靠 parentUuid 编码：a-4 和 a-4' 的 parentUuid 都是 u-3——这就是分叉</text>
+      <text class="ld" x="52" y="272">"当前对话" = 从叶子 u-5' 沿 parentUuid 回走到根的那条链（8.2）</text>
+
+      <text class="ld" x="360" y="318" text-anchor="middle" fill="#C8344E">append-only 给的三件套：崩溃安全（半行最多废一行）、可审计（cat 就能看）、时间旅行（历史永远还在）</text>
+    </g>
+  </svg>
+  <div class="figure-cap">rewind/fork 不删除历史，只是让新消息指向旧的分叉点。文件永远只追加；树形结构完全由每行的 parentUuid 编码。当前对话是从某片叶子回走到根的一条链。</div>
+</div>
+
+<p>这就是第一章那句"状态与计算分离"承诺的红利兑现（一句话回顾：模型无状态，状态全在调用方的数组里）：因为状态只是数据，所以它可持久化、可回放、可分叉——换任何一种"状态藏在对象和闭包里"的架构，这三件事每一件都是大工程。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>日志式存储三件事一起白拿：持久化、审计、时间旅行——全部来自"只追加、不改写"这一条纪律。给状态建模时先问一句：<strong>历史需要不可变吗？</strong>需要，就存事件日志而不是最新快照；快照永远可以从日志推出来，反过来不行。</p>
+</div>
+
+<h2 id="s8-2">8.2 恢复机制——从叶子回走一条链</h2>
+
+<p>恢复是落盘的逆运算，核心函数小得出奇（<code>buildConversationChain</code>，sessionStorage.ts:2069）：</p>
+
+<pre><code class="language-typescript">// buildConversationChain —— 精简：从叶子沿 parentUuid 回走到根，再反转
+const transcript: TranscriptMessage[] = []
+const seen = new Set<UUID>()
+let cur: TranscriptMessage | undefined = leafMessage
+while (cur) {
+  if (seen.has(cur.uuid)) break        // 环保护：记录事件，返回部分链
+  seen.add(cur.uuid)
+  transcript.push(cur)
+  cur = cur.parentUuid ? messages.get(cur.parentUuid) : undefined
+}
+transcript.reverse()
+// 补遗 pass：并行工具调用会形成 DAG（N 个 tool_use 兄弟消息共享
+// 一个 message.id），单亲回走只保得住一支——读侧把兄弟找回来
+return recoverOrphanedParallelToolResults(messages, transcript, seen)</code></pre>
+
+<p><strong>存的时候是树，读的时候是链。</strong><code>--continue</code> 取最新的叶子；<code>--resume</code> 弹列表让用户挑（每个会话只读文件尾 16KB 的元数据窗口来显示标题，不必解析整个文件）；<code>--fork-session</code> 则把链复制到一个新 sessionId 下继续——原会话不动，这是会话级的"另存为"。三个入口共享同一条回走逻辑，差别只在"选哪片叶子"和"要不要换身份"。</p>
+
+<p>但只把消息读回来，恢复才完成一半。<code>processResumedConversation</code>（sessionRestore.ts:409）还原的是<strong>整个工作现场</strong>：任务清单不单独存文件，而是从转录里挖——扫描最后一次 <code>TodoWrite</code> 工具调用的入参（<code>extractTodosFromTranscript</code>），转录本身就是数据库；worktree 状态更妙，恢复时直接 <code>process.chdir(worktreePath)</code>，源码注释点破："process.chdir is the TOCTOU-safe existence check"——切目录这个动作同时兼任存在性检查，目录被删了就抛 ENOENT，顺势把状态改记成"已退出"，不需要"先检查再切换"的竞态两步；此外还有 agent 身份与模型覆盖、成本统计、会话标题，逐项归位。</p>
+
+<p>防御性细节也都是生产事故喂出来的：转录读取有 50MB 硬顶（<code>MAX_TRANSCRIPT_READ_BYTES</code>，注释记着案发编号：会话文件能长到数 GB）；大文件在文件描述符层直接跳过 compact 边界之前的字节——峰值内存按<strong>输出</strong>大小分配而不是按文件大小（一个 151MB、84% 是过期快照的会话，加载内存从 316MB 降到 155MB）；回走时的 <code>seen</code> 集合防 parentUuid 成环——文件是外部输入，哪怕是自己写的，读的时候也当不可信数据对待。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>恢复的完整定义是<strong>"用户回来之后，不需要向系统重新解释任何事"</strong>。消息数组只是及格线；真正拉开差距的是环境状态——cwd、任务清单、后台任务、半途的计划。列一张"崩溃前用户拥有什么"的清单，逐项回答两个问题：存在哪？怎么恢复？凡是答不上来的项，就是用户将来要骂的地方。另外注意 Claude Code 的选择：todos 这类"可以从消息推导的状态"就不单独存——<strong>单一事实源，能推导就不冗余</strong>。</p>
+</div>
+
+<h2 id="s8-3">8.3 Compact——模型给自己写交接文档</h2>
+
+<p>数组只增不减，窗口有硬顶，冲突迟早发生。先看什么时候触发（<code>autoCompact.ts</code>）：</p>
+
+<pre><code class="language-text">有效窗口   = 模型上下文窗口 − min(该模型最大输出, 20_000)   # 给摘要留产出空间
+自动压缩线 = 有效窗口 − 13_000                             # AUTOCOMPACT_BUFFER_TOKENS
+警告线     = 压缩线 − 20_000                               # UI 提前亮黄灯
+手动硬顶   = 有效窗口 − 3_000                              # /compact 的最后余地
+
+连续失败 3 次熔断                    # 有会话曾连续重试 3272 次，白烧 25 万次 API 调用/天
+</code></pre>
+
+<p>每个数字都在回答"压缩这件事自己也要花钱"：压缩要调一次模型、产出最多 2 万 token 的摘要，所以阈值必须在真正的硬顶之前留够余量；压缩可能失败（上下文已经大到连"请你总结"这个请求都发不出去），所以有专门的重试策略（掐掉最老的几轮再试）和熔断器。</p>
+
+<p>触发之后，<code>compactConversation()</code>（compact.ts:387）做的事可以概括成一句话：<strong>让模型给"下一个自己"写交接文档</strong>。压缩提示词要求摘要覆盖九个板块——Primary Request and Intent（用户到底要什么）、Key Technical Concepts、Files and Code Sections（动过哪些文件，附关键代码片段）、Errors and Fixes（犯过什么错、用户怎么纠正的）、Problem Solving、All User Messages（用户原话全录）、Pending Tasks、Current Work、Optional Next Step（下一步，必须引用原文防跑偏）。为什么让模型自己写？因为"这 15 万 token 里什么重要"是语义判断——只有正在干活的模型知道哪句用户反馈是转折点、哪次报错是死胡同。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">机制图</span>
+    <span class="figure-title">Compact 前后：换页，不是清空 <span class="hint">— 磁盘全量不动，内存工作集重建</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 400" role="img" aria-label="Compact 前后对比机制图">
+    <style>
+      .f8-3 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f8-3 .lt{font-size:12px;font-weight:700}
+      .f8-3 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f8-3 .ld{font-size:10px;fill:#5a5346}
+      .f8-3 .pipe{stroke-width:1.6;fill:none}
+    </style>
+    <defs>
+      <marker id="f83g" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+    </defs>
+    <g class="f8-3">
+      <!-- before -->
+      <rect x="30" y="16" width="270" height="270" rx="12" fill="#FBEDEF" stroke="#C8344E" stroke-opacity=".45"/>
+      <text class="lt" x="165" y="40" text-anchor="middle" fill="#C8344E">压缩前：~180K token</text>
+      <rect x="50" y="54" width="230" height="30" rx="6" fill="#fff" stroke="#9a8f7b" stroke-opacity=".4"/>
+      <text class="ls" x="165" y="73" text-anchor="middle">几百轮对话 + 工具结果</text>
+      <rect x="50" y="90" width="230" height="30" rx="6" fill="#fff" stroke="#9a8f7b" stroke-opacity=".4"/>
+      <text class="ls" x="165" y="109" text-anchor="middle">读过的 40 个文件的全文</text>
+      <rect x="50" y="126" width="230" height="30" rx="6" fill="#fff" stroke="#9a8f7b" stroke-opacity=".4"/>
+      <text class="ls" x="165" y="145" text-anchor="middle">试错、报错、重试的全过程</text>
+      <rect x="50" y="162" width="230" height="30" rx="6" fill="#fff" stroke="#9a8f7b" stroke-opacity=".4"/>
+      <text class="ls" x="165" y="181" text-anchor="middle">用户的所有反馈</text>
+      <text class="ld" x="165" y="222" text-anchor="middle">超过 自动压缩线 =</text>
+      <text class="ld" x="165" y="238" text-anchor="middle">有效窗口 − 13K</text>
+      <text class="ld" x="165" y="266" text-anchor="middle" fill="#C8344E">再不压，下一轮就发不出去了</text>
+
+      <path class="pipe" d="M300,150 L416,150" stroke="#1F8F5F" marker-end="url(#f83g)"/>
+      <text class="ld" x="358" y="132" text-anchor="middle" fill="#1F8F5F">模型写九段式</text>
+      <text class="ld" x="358" y="146" text-anchor="middle" fill="#1F8F5F">交接文档</text>
+
+      <!-- after -->
+      <rect x="420" y="16" width="270" height="270" rx="12" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="lt" x="555" y="40" text-anchor="middle" fill="#1F8F5F">压缩后：换上的新工作集</text>
+      <rect x="440" y="54" width="230" height="28" rx="6" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ls" x="555" y="72" text-anchor="middle">compact boundary（分界标记）</text>
+      <rect x="440" y="88" width="230" height="28" rx="6" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ls" x="555" y="106" text-anchor="middle">九段式摘要（≤20K）</text>
+      <rect x="440" y="122" width="230" height="42" rx="6" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ls" x="555" y="140" text-anchor="middle">灾后重建：最近 5 个文件重读</text>
+      <text class="ls" x="555" y="156" text-anchor="middle">（总预算 50K，单文件 5K）</text>
+      <rect x="440" y="170" width="230" height="42" rx="6" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ls" x="555" y="188" text-anchor="middle">plan 文件 + plan 模式提醒 +</text>
+      <text class="ls" x="555" y="204" text-anchor="middle">用过的 skills + 工具清单重播</text>
+      <rect x="440" y="218" width="230" height="28" rx="6" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ls" x="555" y="236" text-anchor="middle">SessionStart('compact') 钩子输出</text>
+      <text class="ld" x="555" y="270" text-anchor="middle">模型醒来：读交接文档，接着干</text>
+
+      <!-- disk -->
+      <rect x="30" y="310" width="660" height="52" rx="12" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="ld" x="360" y="332" text-anchor="middle">磁盘 JSONL：压缩前的全部消息原样还在；boundary 的 parentUuid=null 掐断链——</text>
+      <text class="ld" x="360" y="348" text-anchor="middle">下次 --continue 从 boundary 起步，旧史不进内存但永远可查（加载器甚至在 fd 层跳过它们）</text>
+
+      <text class="ld" x="360" y="388" text-anchor="middle" fill="#C8344E">压缩杀死的不是记忆，是工作集——所以重建工作集（重读文件、重播工具清单）是压缩体验的一半</text>
+    </g>
+  </svg>
+  <div class="figure-cap">Compact 用一次模型调用把 180K 的历史换成 20K 的交接文档，再按预算重建工作集：重读最近碰过的文件、恢复计划与技能上下文、重播工具清单。转录文件不删任何东西，boundary 只是让"当前对话"从新页开始。</div>
+</div>
+
+<p>图右侧的<strong>灾后重建</strong>是最容易被忽略、又最影响体验的一半。摘要写完后上下文被清空，模型对文件系统的"工作记忆"（<code>readFileState</code>）也没了——不重建的话，它醒来第一件事就是把刚才读过的文件挨个重读一遍，压缩省下的 token 立刻还回去。所以 compact 之后自动重注入：最近读过/改过的至多 5 个文件（总预算 50K token、单文件 5K）、进行中的 plan 文件、plan 模式提醒（不然模型压缩完就忘了自己在 plan 模式里）、用过的 skills，以及把工具/Agent/MCP 清单对"空历史"重播一遍——第二章的增量通告机制（一句话回顾：工具清单只在变化时以 delta 附件通告）在空历史上 diff，天然等于全量重播，一行特殊代码都不用加。</p>
+
+<p>全量压缩之外还有两档更轻的手段，构成一个梯度：<strong>microcompact</strong> 不调模型，直接把老的工具结果原地替换成一行 <code>[Old tool result content cleared]</code>——只清 Read/Bash/Grep 这类<strong>可再生</strong>的内容（想要随时能重跑），保留最近 N 个；再往下沉是 <strong>API 侧的 context editing</strong>（<code>clear_thinking</code> / <code>clear_tool_uses</code> 策略），擦除动作直接发生在服务端。三档的成本阶梯很清晰：先擦可再生的（免费），再摘要不可再生的（一次模型调用），实在不行才掐头截断（有损）——每一层都比下一层便宜，也都比下一层保真。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>上下文管理的正确心智模型是<strong>操作系统的换页</strong>：磁盘（转录）保全量，内存（窗口）只装工作集，压缩是把冷页换出、按需换回（重读文件）。两个可直接抄的决定：摘要让模型自己写（重要性是语义判断），压缩后必须重建工作集（否则省下的 token 会被重读吃回去）。</p>
+  <p><span class="role">给产品经理</span>压缩应该在阈值前无感发生，留给用户的感知面只有一条状态：上下文余量。警告线、压缩线、硬顶三级设计的本质是：<strong>永远不让用户撞上"发不出去"的那堵墙</strong>——撞墙一次，用户对长对话的信任就清零一次。</p>
+</div>
+
+<hr>
+
+<h2>本章代码</h2>
+
+<p>本章的示例在 <code>code/examples/session_demo.py</code>。它在临时目录里实现一个迷你 Session 系统：append-only JSONL 落盘（UUID 去重）、parentUuid 消息树与 rewind 分叉、从叶子回走的恢复（含 todos 挖掘）、以及带 boundary 的 compact 换页——纯本地运行，无需 API Key。</p>
+
+<pre><code class="language-python"># 纯本地运行，无需 API Key
+cd code
+uv run python examples/session_demo.py</code></pre>
+
+<p>骨架与源码的对应关系：</p>
+
+<pre><code class="language-text"># session_demo.py 骨架                    ←→  src/ 路径
+
+def record(messages)                      # recordTranscript()：UUID 去重后追加
+                                          #   utils/sessionStorage.ts:1408
+def load(path)                            # loadTranscriptFile()：JSONL → Map
+                                          #   utils/sessionStorage.ts:3472
+def build_chain(messages, leaf)           # buildConversationChain()：叶子回走+反转
+  #   seen 集合防环                       #   utils/sessionStorage.ts:2069
+def resume(path)                          # processResumedConversation()：
+  #   选叶子 → 走链 → 挖 todos            #   utils/sessionRestore.ts:409
+def rewind(from_uuid)                     # 分叉：新消息 parentUuid 指向历史点，
+                                          #   旧枝留在文件里
+def compact(messages)                     # compactConversation()：摘要 + boundary
+  #   boundary.parentUuid = None 掐链     #   services/compact/compact.ts:387
+阈值公式 / 灾后重建常量                    # autoCompact.ts:62 + compact.ts:122</code></pre>
+
 <div class="page-nav">
   <button class="page-nav-btn" onclick="showPage('ch7')">
     <span class="nav-dir">← 上一章</span>
@@ -5424,8 +6152,8 @@ shutdown 三步握手                          # sendShutdownRequestToMailbox +
     <tr><td>第 4 章</td><td><code>src/tools/AgentTool/</code></td><td><code>AgentTool.call()</code> / <code>runAgent()</code> / <code>createSubagentContext()</code></td></tr>
     <tr><td>第 5 章</td><td><code>src/coordinator/coordinatorMode.ts</code></td><td><code>getCoordinatorSystemPrompt()</code></td></tr>
     <tr><td>第 6 章</td><td><code>src/utils/mailbox.ts</code></td><td><code>Mailbox</code> class</td></tr>
-    <tr><td>第 7 章</td><td><code>src/utils/permissions/</code></td><td><code>canUseTool()</code></td></tr>
-    <tr><td>第 8 章</td><td><code>src/utils/sessionStorage.ts</code></td><td><code>writeAgentMetadata()</code></td></tr>
+    <tr><td>第 7 章</td><td><code>src/utils/permissions/permissions.ts</code> / <code>src/utils/abortController.ts</code></td><td><code>hasPermissionsToUseToolInner()</code> / <code>resolveHookPermissionDecision()</code> / <code>createChildAbortController()</code></td></tr>
+    <tr><td>第 8 章</td><td><code>src/utils/sessionStorage.ts</code> / <code>src/services/compact/compact.ts</code></td><td><code>recordTranscript()</code> / <code>buildConversationChain()</code> / <code>compactConversation()</code></td></tr>
   </tbody>
 </table>
 <div class="page-nav">

@@ -869,9 +869,10 @@
         <svg class="nav-arrow" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="nav-sections">
-        <a class="nav-section" onclick="showPage('ch6')">6.1 Mailbox 架构设计</a>
-        <a class="nav-section" onclick="showPage('ch6')">6.2 Agent 寻址机制</a>
-        <a class="nav-section" onclick="showPage('ch6')">6.3 消息分类与过滤</a>
+        <a class="nav-section" onclick="showSection('ch6','s6-1')">6.1 Mailbox 架构——文件即消息总线</a>
+        <a class="nav-section" onclick="showSection('ch6','s6-2')">6.2 寻址与收信——轮询与阻塞</a>
+        <a class="nav-section" onclick="showSection('ch6','s6-3')">6.3 消息分类——数据面与控制面</a>
+        <a class="nav-section" onclick="showSection('ch6','s6-4')">6.4 协议实战——权限瞬移与优雅关机</a>
       </div>
     </div>
 
@@ -1196,7 +1197,7 @@
             <div class="toc-dot"><div class="toc-dot-inner"></div></div>
             <div class="toc-body">
               <div class="toc-chapter-title">第六章 · Agent 间通信——Mailbox</div>
-              <div class="toc-chapter-desc">架构设计 · Agent 寻址机制 · 消息分类过滤</div>
+              <div class="toc-chapter-desc">文件即总线 · 轮询与阻塞收信 · 数据面/控制面 · 权限瞬移与优雅关机</div>
             </div>
           </div>
 
@@ -4899,12 +4900,457 @@ WORKER_TOOLS（无 spawn，无 send）          # ASYNC_AGENT_ALLOWED_TOOLS
 <p class="chapter-subtitle">
   实现目标：任意 Agent 可以给另一个 Agent 发消息，接收方可以阻塞等待，也可以非阻塞轮询。
 </p>
-<h2>6.1 Mailbox 架构设计</h2>
-<p>（内容待填）</p>
-<h2>6.2 Agent 寻址机制</h2>
-<p>（内容待填）</p>
-<h2>6.3 消息分类与过滤</h2>
-<p>（内容待填）</p>
+
+<h2>引言 · 当星形不够用——把队列搬到磁盘上</h2>
+
+<p>第五章的协调器有一个隐含前提：所有 Worker 都活在<strong>同一个进程里</strong>。SendMessage 往运行中的 Worker 投递消息，本质是往同一份内存里的 <code>pendingMessages</code> 数组 push 一项——这在单进程内天经地义，可一旦跨出进程边界就全部失效。而 Claude Code 的团队模式（Agent Teams / Swarm）恰恰要跨：领队在一个终端里，队友各自是<strong>独立的 Claude Code 进程</strong>，跑在 tmux 的不同窗格里，互相看不见对方的内存、端口、PID。</p>
+
+<p>两个互不相识的进程要通信，工程上的标准答案是 socket、HTTP、消息队列。Claude Code 选了一个"土"得多的方案：<strong>每人一只 JSON 文件当信箱，写信加锁追加，收信定时轮询</strong>。土，但仔细掂量会发现它精确匹配了这个场景的每一项需求——本章就从这只文件信箱出发，一路讲到跑在它上面的高层协议：权限跨进程转授、计划审批、优雅关机。你会再次看到第五章的规律：<strong>传输层越简单，语义越容易做对；复杂度应该住在协议层，而协议大半是提示词和 JSON 约定</strong>。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">架构总图</span>
+    <span class="figure-title">文件即消息总线：两个进程，唯一的共享介质是磁盘 <span class="hint">— 没有 socket，没有端口，没有 broker</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 440" role="img" aria-label="Mailbox 文件消息总线架构总图">
+    <style>
+      .f6-0 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f6-0 .lt{font-size:12.5px;font-weight:700}
+      .f6-0 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f6-0 .ld{font-size:10.5px;fill:#5a5346}
+      .f6-0 .pipe{stroke-width:1.6;fill:none}
+    </style>
+    <defs>
+      <marker id="f60a" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#2563EB"/></marker>
+      <marker id="f60b" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+    </defs>
+    <g class="f6-0">
+      <!-- Leader process -->
+      <rect x="14" y="16" width="330" height="150" rx="12" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="lt" x="179" y="40" text-anchor="middle" fill="#2563EB">领队进程（tmux 窗格 0）</text>
+      <text class="ls" x="179" y="60" text-anchor="middle">team-lead · 完整的 Claude Code 实例</text>
+      <rect x="30" y="74" width="140" height="76" rx="8" fill="#fff" stroke="#2563EB" stroke-opacity=".35"/>
+      <text class="ld" x="100" y="94" text-anchor="middle" font-weight="600">发信</text>
+      <text class="ls" x="100" y="112" text-anchor="middle">SendMessage →</text>
+      <text class="ls" x="100" y="127" text-anchor="middle">writeToMailbox()</text>
+      <text class="ls" x="100" y="142" text-anchor="middle">加锁 · 追加</text>
+      <rect x="188" y="74" width="140" height="76" rx="8" fill="#fff" stroke="#2563EB" stroke-opacity=".35"/>
+      <text class="ld" x="258" y="94" text-anchor="middle" font-weight="600">收信</text>
+      <text class="ls" x="258" y="112" text-anchor="middle">useInboxPoller</text>
+      <text class="ls" x="258" y="127" text-anchor="middle">每 1s 读未读</text>
+      <text class="ls" x="258" y="142" text-anchor="middle">读后标记已读</text>
+
+      <!-- Teammate process -->
+      <rect x="376" y="16" width="330" height="150" rx="12" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="lt" x="541" y="40" text-anchor="middle" fill="#1F8F5F">队友进程（tmux 窗格 1）</text>
+      <text class="ls" x="541" y="60" text-anchor="middle">ada · 另一个完整的 Claude Code 实例</text>
+      <rect x="392" y="74" width="140" height="76" rx="8" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ld" x="462" y="94" text-anchor="middle" font-weight="600">收信</text>
+      <text class="ls" x="462" y="112" text-anchor="middle">同一套 poller，</text>
+      <text class="ls" x="462" y="127" text-anchor="middle">读自己的信箱</text>
+      <text class="ls" x="462" y="142" text-anchor="middle">闲时立即成轮</text>
+      <rect x="550" y="74" width="140" height="76" rx="8" fill="#fff" stroke="#1F8F5F" stroke-opacity=".4"/>
+      <text class="ld" x="620" y="94" text-anchor="middle" font-weight="600">发信</text>
+      <text class="ls" x="620" y="112" text-anchor="middle">给领队、给同伴</text>
+      <text class="ls" x="620" y="127" text-anchor="middle">同一个 writeToMailbox</text>
+      <text class="ls" x="620" y="142" text-anchor="middle">Stop 钩子发空闲信</text>
+
+      <!-- Filesystem -->
+      <rect x="60" y="240" width="600" height="150" rx="12" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="lt" x="360" y="264" text-anchor="middle" fill="#3a3326">文件系统 ~/.claude/teams/refactor/</text>
+      <rect x="80" y="280" width="180" height="92" rx="8" fill="#fff" stroke="#9a8f7b" stroke-opacity=".4"/>
+      <text class="ls" x="94" y="300">config.json</text>
+      <text class="ls" x="106" y="317">members: [lead, ada,</text>
+      <text class="ls" x="106" y="332">          bob]  名册</text>
+      <text class="ls" x="94" y="352">（Team = TaskList，1:1）</text>
+      <rect x="284" y="280" width="180" height="92" rx="8" fill="#fff" stroke="#2563EB" stroke-opacity=".45"/>
+      <text class="ls" x="298" y="300">inboxes/lead.json</text>
+      <text class="ls" x="310" y="317">[{from:"ada",</text>
+      <text class="ls" x="310" y="332">  text:…, read:false}]</text>
+      <text class="ls" x="298" y="352">+ lead.json.lock 锁文件</text>
+      <rect x="488" y="280" width="180" height="92" rx="8" fill="#fff" stroke="#1F8F5F" stroke-opacity=".45"/>
+      <text class="ls" x="502" y="300">inboxes/ada.json</text>
+      <text class="ls" x="514" y="317">每人一只信箱，</text>
+      <text class="ls" x="514" y="332">按名字寻址</text>
+      <text class="ls" x="502" y="352">+ ada.json.lock</text>
+
+      <!-- Arrows -->
+      <path class="pipe" d="M100,166 C100,220 480,236 545,278" stroke="#2563EB" marker-end="url(#f60a)"/>
+      <text class="ld" x="200" y="212" fill="#2563EB">写 ada 的信箱（加锁）</text>
+      <path class="pipe" d="M374,308 C330,270 280,220 262,170" stroke="#2563EB" stroke-dasharray="6 4" marker-end="url(#f60a)"/>
+      <text class="ld" x="255" y="238" fill="#2563EB">轮询自己的信箱</text>
+      <path class="pipe" d="M620,166 C620,210 500,240 452,278" stroke="#1F8F5F" marker-end="url(#f60b)"/>
+      <text class="ld" x="560" y="212" fill="#1F8F5F">写 lead / bob 的信箱</text>
+
+      <text class="ld" x="360" y="420" text-anchor="middle" fill="#C8344E">两个进程互不知道对方的 PID、端口、甚至存活与否——只共享一条目录约定</text>
+    </g>
+  </svg>
+  <div class="figure-cap">Mailbox 的全部架构：每个成员一只 JSON 信箱文件，写方加锁追加，收方轮询未读。进程之间零直连——一方崩溃、重启、换机器（只要挂同一块盘），通信语义不受任何影响。</div>
+</div>
+
+<div class="goal-card">
+  <div class="goal-card-label">本章目标</div>
+  <p>读完这章，你会理解：</p>
+  <ul>
+    <li><span class="sec-no">6.1</span><span>为什么用文件当消息总线——一只加锁的 JSON 信箱如何胜过 socket 与 broker</span></li>
+    <li><span class="sec-no">6.2</span><span>寻址与收信的三条通道：1s 轮询、500ms 阻塞等待、工具轮边界注入，以及 at-least-once 递送语义</span></li>
+    <li><span class="sec-no">6.3</span><span>数据面与控制面的分离——哪些消息给模型看，哪些必须拦下来给代码处理</span></li>
+    <li><span class="sec-no">6.4</span><span>跑在信箱上的两个完整协议：权限跨进程"瞬移"与优雅关机握手</span></li>
+  </ul>
+</div>
+
+<h2 id="s6-1">6.1 Mailbox 架构——文件即消息总线</h2>
+
+<p>先看数据结构，全部机制围绕它展开（<code>utils/teammateMailbox.ts</code>）：</p>
+
+<pre><code class="language-typescript">// 信箱地址：~/.claude/teams/{team}/inboxes/{agent_name}.json
+export function getInboxPath(agentName: string, teamName?: string): string {
+  return join(getTeamsDir(), sanitize(team), 'inboxes', `${sanitize(agentName)}.json`)
+}
+
+// 一封信：发件人 + 正文 + 已读标记，没有了
+export type TeammateMessage = {
+  from: string          // 发件人名字（自愿声明，见 6.4 的信任模型）
+  text: string          // 正文：自然语言，或 JSON 编码的协议消息（6.3）
+  timestamp: string
+  read: boolean         // 收件方消费后置 true——递送语义的关键
+  color?: string        // 发件人的 UI 颜色
+  summary?: string      // 5-10 词摘要，给 UI 预览用
+}</code></pre>
+
+<p>写入是唯一需要小心的操作：一个团队里多个进程可能同时给同一个人写信，两个 read-modify-write 交错就会丢信。解法是经典的<strong>锁文件 + 重试退避</strong>：</p>
+
+<pre><code class="language-typescript">// writeToMailbox —— 精简（teammateMailbox.ts:134）
+await writeFile(inboxPath, '[]', { flag: 'wx' })   // 不存在则创建（原子）
+const release = await lockfile.lock(inboxPath, {
+  retries: { retries: 10, minTimeout: 5, maxTimeout: 100 },  // 排队等锁，不失败
+})
+try {
+  const messages = await readMailbox(recipientName)   // 拿到锁后重读最新状态
+  messages.push({ ...message, read: false })
+  await writeFile(inboxPath, jsonStringify(messages, null, 2))
+} finally {
+  await release()
+}</code></pre>
+
+<p>三行注释值得展开成三个设计判断：</p>
+
+<p><strong>为什么是文件，不是 socket / HTTP / 消息队列？</strong>把场景的约束列出来，答案几乎是推出来的。第一，通信双方是<strong>不同后端上的进程</strong>——可能同进程（in-process 队友）、可能是 tmux 窗格、iTerm 窗格，未来还可能是远程会话；socket 需要端口协商和服务发现，文件路径本身就是全局约定好的"地址"。第二，Agent 的回合以秒到分钟计，<strong>1 秒的轮询延迟在这个时间尺度上是免费的</strong>——为省这 1 秒去引入一个 broker，是拿复杂度换一个没人感知的指标。第三，消息天然要求<strong>持久与可审计</strong>：进程崩了信还在，重启接着读；用户随时可以 <code>cat</code> 一眼信箱排查问题。第四，零基础设施——不需要用户装 Redis，不需要起 daemon。文件系统是唯一保证存在的中间件。</p>
+
+<p><strong>为什么锁要重试退避，而不是失败报错？</strong>注释原话："concurrent callers (multiple Claudes in a swarm) wait for the lock instead of failing immediately"。发信方是模型的工具调用，一次失败对模型而言是一次需要理解和重试的异常；把重试下沉到传输层（最多 10 次、5–100ms 退避），模型看到的世界就永远是"发信必成功"。<strong>底层多做一点，上层的心智模型就少一个分支。</strong></p>
+
+<p><strong>为什么拿到锁后要重读？</strong>锁保护的是 read-modify-write 全程，而不是 write 一下。等锁期间别人可能已经追加了消息，用等锁前读的旧数组覆盖回去就会丢信。这是所有"文件当数据库"场景的第一课，源码用注释把它钉死在那里。</p>
+
+<p>信箱之外还有一份<strong>名册</strong>：<code>TeamCreate</code> 工具创建 <code>~/.claude/teams/{team}/config.json</code>，记录全体成员（名字、agentId、颜色、活跃状态），同时创建一个同名任务列表目录——<strong>Team 与 TaskList 一一对应</strong>，任务的指派（TaskUpdate 的 owner 字段）和消息的投递共享同一套成员名单。广播（<code>to: '*'</code>）就是读名册、逐个写信箱的语法糖。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>选传输层时先问时间尺度。Agent 回合是秒级的，消息延迟 1 秒无感知——此时持久性、可审计性、零部署的价值远大于吞吐和延迟。反过来，如果你的 Agent 需要毫秒级互动（比如协作编辑同一个文件的光标），文件轮询就是错的。<strong>没有"最好的消息机制"，只有和交互节奏匹配的消息机制。</strong></p>
+</div>
+
+<h2 id="s6-2">6.2 寻址与收信——轮询、阻塞与递送语义</h2>
+
+<h3>6.2.1 我是谁——三层身份解析</h3>
+
+<p>信箱按名字寻址，那"我的名字"从哪来？这个看似平凡的问题因为队友有两种形态而变得讲究（<code>utils/teammate.ts</code>）：</p>
+
+<pre><code class="language-text">身份解析优先级（getAgentName / getTeamName）
+
+① AsyncLocalStorage        进程内队友。同一个进程里可能同时跑着领队
+   （teammateContext）      和 N 个进程内队友，全局变量会互相覆盖——
+                            AsyncLocalStorage 给每条异步调用链一份
+                            隔离的身份，谁在跑就解析出谁。
+② dynamicTeamContext       tmux 队友。独立进程，身份来自启动时的
+   （CLI 参数注入）          CLI 参数（--agent-id --team-name）。
+③ AppState.teamContext     领队。它不是被派生的，身份记在应用状态里。</code></pre>
+
+<p>值得停一秒的是第①层。进程内队友和领队<strong>共享同一份内存、同一个 React 状态树</strong>，"当前代码在为谁跑"这个问题没有全局答案，只有调用链上下文能回答。AsyncLocalStorage 在这里扮演的角色，和第四章 SubAgent 的隔离 messages 数组同构：<strong>并发的身份必须随执行流走，不能存在共享的地方。</strong></p>
+
+<h3>6.2.2 收信的三条通道</h3>
+
+<p>本章副标题说"接收方可以阻塞等待，也可以非阻塞轮询"，源码里实际有三条通道，按接收方的状态各司其职：</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">机制图</span>
+    <span class="figure-title">三条收信通道：谁在什么状态下用哪条 <span class="hint">— 已读标记永远在安全递送之后</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 350" role="img" aria-label="三条收信通道机制图">
+    <style>
+      .f6-2 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f6-2 .lt{font-size:12px;font-weight:700}
+      .f6-2 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f6-2 .ld{font-size:10px;fill:#5a5346}
+      .f6-2 .pipe{stroke-width:1.5;fill:none}
+    </style>
+    <defs>
+      <marker id="f62a" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#9a8f7b"/></marker>
+    </defs>
+    <g class="f6-2">
+      <rect x="270" y="14" width="180" height="44" rx="9" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".5"/>
+      <text class="ls" x="360" y="32" text-anchor="middle">inboxes/{me}.json</text>
+      <text class="ld" x="360" y="48" text-anchor="middle">未读消息若干</text>
+
+      <path class="pipe" d="M300,58 C220,80 150,90 120,112" stroke="#9a8f7b" marker-end="url(#f62a)"/>
+      <path class="pipe" d="M360,58 L360,112" stroke="#9a8f7b" marker-end="url(#f62a)"/>
+      <path class="pipe" d="M420,58 C500,80 570,90 600,112" stroke="#9a8f7b" marker-end="url(#f62a)"/>
+
+      <!-- Channel 1 -->
+      <rect x="14" y="116" width="212" height="168" rx="10" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="lt" x="120" y="140" text-anchor="middle" fill="#2563EB">① 非阻塞轮询</text>
+      <text class="ls" x="120" y="158" text-anchor="middle">useInboxPoller · 每 1s</text>
+      <text class="ld" x="30" y="182">进程型队友和领队的主通道。</text>
+      <text class="ld" x="30" y="200">空闲 → 立即把消息提交成</text>
+      <text class="ld" x="30" y="216">新的一轮对话；</text>
+      <text class="ld" x="30" y="234">忙碌 → 先进内存 inbox 队列，</text>
+      <text class="ld" x="30" y="250">UI 显示"有新消息"，</text>
+      <text class="ld" x="30" y="266">回合结束统一递送。</text>
+
+      <!-- Channel 2 -->
+      <rect x="254" y="116" width="212" height="168" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="lt" x="360" y="140" text-anchor="middle" fill="#1F8F5F">② 阻塞等待</text>
+      <text class="ls" x="360" y="158" text-anchor="middle">waitForNextPromptOrShutdown</text>
+      <text class="ld" x="270" y="182">进程内队友专用：跑完一轮后</text>
+      <text class="ld" x="270" y="200">不退出，进入 500ms 的等待</text>
+      <text class="ld" x="270" y="216">循环——先查内存直递消息，</text>
+      <text class="ld" x="270" y="234">再查文件信箱；shutdown</text>
+      <text class="ld" x="270" y="250">请求优先出队（防洪泛饿死）。</text>
+      <text class="ld" x="270" y="268" fill="#1F8F5F">队友常驻空闲，不是跑完即死。</text>
+
+      <!-- Channel 3 -->
+      <rect x="494" y="116" width="212" height="168" rx="10" fill="#FDFCF9" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="lt" x="600" y="140" text-anchor="middle" fill="#3a3326">③ 轮内注入</text>
+      <text class="ls" x="600" y="158" text-anchor="middle">getTeammateMailboxAttachments</text>
+      <text class="ld" x="510" y="182">正在跑的回合里，每个工具轮</text>
+      <text class="ld" x="510" y="200">边界顺手检查一次信箱，新信</text>
+      <text class="ld" x="510" y="216">作为附件拼进下一次模型调用。</text>
+      <text class="ld" x="510" y="234">与第五章 pendingMessages 的</text>
+      <text class="ld" x="510" y="250">时机完全一致：只在边界交接，</text>
+      <text class="ld" x="510" y="266">绝不打断进行中的工具。</text>
+
+      <text class="ld" x="360" y="316" text-anchor="middle" fill="#C8344E">共同纪律：先安全递送（成轮 / 入队 / 拼附件），再回写 read=true——宁可重复，绝不丢失</text>
+      <text class="ls" x="360" y="338" text-anchor="middle">at-least-once + 按 id 幂等去重 = 教科书递送语义，总共几十行代码</text>
+    </g>
+  </svg>
+  <div class="figure-cap">三条收信通道覆盖接收方的三种状态：闲着（轮询成轮）、常驻等活（阻塞循环）、干活中（轮边界注入）。无论哪条，已读标记都在消息安全落地之后才写回——这是整个递送语义的支点。</div>
+</div>
+
+<p>递送语义值得单独讲透，因为它是"文件当消息队列"最容易做错的地方。<code>useInboxPoller</code> 的注释把顺序写得很明白：<strong>先递送或可靠入队，再标记已读</strong>。如果反过来——先标已读再递送——进程在两步之间崩溃，消息就永远消失了；按现在的顺序，崩溃的后果只是下次轮询重读一遍，即经典的 <strong>at-least-once</strong>（至少一次）语义。重复递送的代价由消费端的<strong>幂等去重</strong>抵消：比如权限请求入队前按 <code>tool_use_id</code> 查重（"markMessagesAsRead failed on a prior poll — skip if already queued"）。丢失不可恢复、重复可以过滤，两害相权，分布式系统五十年的老结论，在这里用几十行代码复刻了一遍。</p>
+
+<p>另一个容易错过的细节在阻塞循环里：出队前先<strong>全量扫描一遍未读消息找 shutdown 请求，找到就插队处理</strong>。注释给了原因：点对点消息可能洪泛（队友之间聊得太热闹），如果严格 FIFO，关机指令会被淹没在队列尾部，想停都停不下来。控制类消息优先于数据类消息——这个取舍在 5.3 的通知队列里是"用户输入优先于系统通知"，方向相反，原则相同：<strong>队列必须为"改变队列命运的消息"留插队通道。</strong></p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>注意全书出现第三次的同构：工具结果注入（第一章）、协调器通知注入（第五章）、信箱消息注入（本章），全部是"把内容放进对方下一轮输入"。Mailbox 没有发明新的通信范式，它只是把"对方的输入队列"<strong>从进程内存搬到了文件系统</strong>——于是通信自动获得了跨进程、持久化、可审计三个属性，而模型侧的世界观完全不用变：还是收到一条消息，还是下一轮看到。</p>
+</div>
+
+<h2 id="s6-3">6.3 消息分类——数据面与控制面</h2>
+
+<p>信箱里流动的消息其实是两个物种。一种给<strong>模型</strong>看：自然语言，"我把 auth 模块查完了，结论如下"；一种给<strong>代码</strong>看：JSON 编码的协议消息，"type: permission_request, tool: Bash, input: …"。收信端的第一件事就是把它们分开（<code>useInboxPoller.ts</code> 的分拣循环）：</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">分拣器</span>
+    <span class="figure-title">数据面给模型，控制面给代码 <span class="hint">— 分错任何一个方向都是事故</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 400" role="img" aria-label="消息分拣：数据面与控制面">
+    <style>
+      .f6-3 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f6-3 .lt{font-size:12px;font-weight:700}
+      .f6-3 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f6-3 .ld{font-size:10px;fill:#5a5346}
+      .f6-3 .pipe{stroke-width:1.5;fill:none}
+    </style>
+    <defs>
+      <marker id="f63g" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+      <marker id="f63b" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#2563EB"/></marker>
+    </defs>
+    <g class="f6-3">
+      <rect x="262" y="14" width="196" height="60" rx="10" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="lt" x="360" y="38" text-anchor="middle" fill="#3a3326">未读消息</text>
+      <text class="ls" x="360" y="58" text-anchor="middle">text 能否解析出 JSON type？</text>
+
+      <path class="pipe" d="M300,74 C220,96 170,104 140,126" stroke="#2563EB" marker-end="url(#f63b)"/>
+      <text class="ld" x="180" y="102" fill="#2563EB">否 → 数据面</text>
+      <path class="pipe" d="M420,74 C500,96 550,104 580,126" stroke="#1F8F5F" marker-end="url(#f63g)"/>
+      <text class="ld" x="490" y="102" fill="#1F8F5F">是 → 控制面</text>
+
+      <!-- Data plane -->
+      <rect x="14" y="130" width="280" height="176" rx="10" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="lt" x="154" y="154" text-anchor="middle" fill="#2563EB">数据面 → 模型的上下文</text>
+      <rect x="30" y="168" width="248" height="72" rx="8" fill="#fff" stroke="#2563EB" stroke-opacity=".35"/>
+      <text class="ls" x="42" y="188">&lt;teammate-message</text>
+      <text class="ls" x="54" y="204">  teammate_id="ada" color="red"&gt;</text>
+      <text class="ls" x="54" y="220">自然语言正文…</text>
+      <text class="ls" x="42" y="236">&lt;/teammate-message&gt;</text>
+      <text class="ld" x="154" y="262" text-anchor="middle">闲时成轮 / 忙时排队 / 轮内附件</text>
+      <text class="ld" x="154" y="280" text-anchor="middle">模型读了之后自主决定回不回、</text>
+      <text class="ld" x="154" y="296" text-anchor="middle">怎么回——通信语义交给语言本身</text>
+
+      <!-- Control plane -->
+      <rect x="426" y="130" width="280" height="176" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="lt" x="566" y="154" text-anchor="middle" fill="#1F8F5F">控制面 → 代码的处理器</text>
+      <text class="ls" x="442" y="178">permission_request / response</text>
+      <text class="ls" x="442" y="194">sandbox_permission_* （网络放行）</text>
+      <text class="ls" x="442" y="210">plan_approval_request / response</text>
+      <text class="ls" x="442" y="226">shutdown_request / approved / rejected</text>
+      <text class="ls" x="442" y="242">team_permission_update（权限同步）</text>
+      <text class="ls" x="442" y="258">mode_set_request（模式下发）</text>
+      <text class="ls" x="442" y="274">idle_notification（Stop 钩子发出）</text>
+      <text class="ls" x="442" y="290">task_assignment（任务指派）</text>
+
+      <text class="ld" x="360" y="334" text-anchor="middle" fill="#C8344E">isStructuredProtocolMessage() 挡在数据面入口：协议消息绝不能混进模型上下文——</text>
+      <text class="ld" x="360" y="352" text-anchor="middle" fill="#C8344E">模型会试图"礼貌地回复"一个 JSON，而它的处理器却永远等不到它</text>
+      <text class="ld" x="360" y="380" text-anchor="middle">例外：shutdown_request 双面投递——代码知道要握手，模型也要读到它才能决定同不同意</text>
+    </g>
+  </svg>
+  <div class="figure-cap">同一只信箱跑两个平面：自然语言走数据面进模型上下文，JSON 协议消息走控制面进代码处理器。分拣的依据只有一个——text 字段能否解析出已知的 type。</div>
+</div>
+
+<p>为什么这个分离值得用一个守卫函数（<code>isStructuredProtocolMessage</code>）严防死守？源码注释给了正向理由："If getTeammateMailboxAttachments consumes them first, they get bundled as raw text in attachments and never reach their intended handlers"——数据面抢跑，控制面的处理器就永远收不到消息，权限请求石沉大海，Worker 卡死在等待里。反过来想还有一层：让模型读到一坨 <code>{"type":"permission_response",...}</code> 不仅无用，而且<strong>有害</strong>——模型可能把它当成要回应的内容，生成一段针对 JSON 的"回复"，白烧 token 还污染对话。<strong>LLM 系统里的每一字节上下文都该是模型能行动的信息；机器对机器的信令，模型一个字都不该看见。</strong></p>
+
+<p>反方向的分错更隐蔽：把该给模型看的消息拦在代码层。分拣表里有一行专门处理这个微妙情况——<code>shutdown_request</code> 被识别为协议消息，但处理方式是 <code>regularMessages.push(m)</code>：<strong>双面投递</strong>。因为关机请求的最终决定权在模型（6.4 详述），代码只负责识别和优先级，模型必须读到原文才能判断"我手头的活能不能停"。计划审批请求同理：领队侧自动批准之后，请求原文仍然进入领队模型的上下文——"the approval is already sent, but the model has context about what the teammate is doing"。<strong>控制面处理动作，数据面保留知情权</strong>，两面不冲突。</p>
+
+<p>数据面的包装格式也顺带看一眼：<code>&lt;teammate-message teammate_id="ada" color="red" summary="..."&gt;</code>。和第五章的 <code>&lt;task-notification&gt;</code> 一样，这是"伪装成 user 消息的非用户输入"，靠 XML 标签让模型识别说话的是谁。<code>color</code> 甚至会传进 UI，让领队屏幕上每个队友的发言带自己的颜色——协议为人和模型各服务一半。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>"数据面/控制面分离"是网络设备的经典架构，在 LLM 系统里有了新含义：<strong>模型的上下文窗口是数据面，代码路径是控制面</strong>。设计多 Agent 协议时对每种消息问一句：模型读到它能做什么？能行动的进上下文，不能行动的走代码，需要知情又需要代码动作的双面投递。这个三分法比"全部塞给模型"（浪费+误导）和"全部代码处理"（模型失去决策权）都更精确。</p>
+</div>
+
+<h2 id="s6-4">6.4 协议实战——权限瞬移与优雅关机</h2>
+
+<p>传输层（6.1）和分拣器（6.3）就位后，真正有产品价值的东西是跑在上面的协议。挑两个最完整的看：一个解决"多进程的权限弹窗该弹在哪"，一个解决"怎么体面地解散团队"。</p>
+
+<h3>6.4.1 权限瞬移——跨进程 RPC，传输层是两封信</h3>
+
+<p>场景：tmux 窗格里的队友要跑 <code>rm -rf build/</code>，权限系统要求用户确认。弹窗弹在队友自己的窗格里？用户正盯着领队的窗格，根本看不见，队友一卡就是十分钟。Claude Code 的答案是把弹窗<strong>瞬移到领队的屏幕上</strong>：</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">时序图</span>
+    <span class="figure-title">权限请求的跨进程往返 <span class="hint">— 一次 RPC，传输层是两封 JSON 信</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 330" role="img" aria-label="权限瞬移时序图">
+    <style>
+      .f6-4 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f6-4 .lt{font-size:11.5px;font-weight:700}
+      .f6-4 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f6-4 .ld{font-size:10px;fill:#5a5346}
+      .f6-4 .pipe{stroke-width:1.5;fill:none}
+      .f6-4 .lane{stroke:#c3bcae;stroke-width:1;stroke-dasharray:3 4}
+    </style>
+    <defs>
+      <marker id="f64g" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#1F8F5F"/></marker>
+      <marker id="f64b" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#2563EB"/></marker>
+    </defs>
+    <g class="f6-4">
+      <text class="lt" x="120" y="30" text-anchor="middle" fill="#1F8F5F">队友进程（窗格 1）</text>
+      <text class="lt" x="360" y="30" text-anchor="middle" fill="#3a3326">文件系统</text>
+      <text class="lt" x="600" y="30" text-anchor="middle" fill="#2563EB">领队进程（窗格 0）</text>
+      <line class="lane" x1="120" y1="40" x2="120" y2="310"/>
+      <line class="lane" x1="360" y1="40" x2="360" y2="310"/>
+      <line class="lane" x1="600" y1="40" x2="600" y2="310"/>
+
+      <rect x="34" y="52" width="172" height="34" rx="7" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="ld" x="120" y="66" text-anchor="middle">工具调用触发权限检查，</text>
+      <text class="ld" x="120" y="80" text-anchor="middle">挂起等待，注册回调（request_id）</text>
+
+      <path class="pipe" d="M126,96 L354,110" stroke="#1F8F5F" marker-end="url(#f64g)"/>
+      <text class="ls" x="230" y="96">① permission_request → lead 信箱</text>
+      <path class="pipe" d="M366,114 L594,128" stroke="#1F8F5F" marker-end="url(#f64g)"/>
+      <text class="ls" x="470" y="114">② poller 1s 内读到</text>
+
+      <rect x="514" y="140" width="172" height="48" rx="7" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="ld" x="600" y="156" text-anchor="middle">进标准权限队列，弹出</text>
+      <text class="ld" x="600" y="170" text-anchor="middle">原生 UI（diff 视图俱全），</text>
+      <text class="ld" x="600" y="184" text-anchor="middle">带队友名徽章；用户点"允许"</text>
+
+      <path class="pipe" d="M594,200 L366,214" stroke="#2563EB" marker-end="url(#f64b)"/>
+      <text class="ls" x="440" y="204" text-anchor="end">③ permission_response → ada 信箱</text>
+      <path class="pipe" d="M354,218 L126,232" stroke="#2563EB" marker-end="url(#f64b)"/>
+      <text class="ls" x="250" y="218" text-anchor="end">④ 队友 poller 读到</text>
+
+      <rect x="34" y="244" width="172" height="34" rx="7" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="ld" x="120" y="258" text-anchor="middle">按 request_id 找到挂起的回调，</text>
+      <text class="ld" x="120" y="272" text-anchor="middle">resolve → 工具继续执行</text>
+
+      <text class="ld" x="360" y="302" text-anchor="middle" fill="#C8344E">按 tool_use_id 幂等去重（at-least-once 的消费端配套）；网络放行（sandbox_*）走同一套往返</text>
+    </g>
+  </svg>
+  <div class="figure-cap">权限瞬移的完整往返：队友挂起工具调用并注册回调，请求信 1 秒内到达领队并弹出与本地完全一致的权限 UI，用户的决定原路写回，回调 resolve，工具从挂起处继续。整套跨进程 RPC 没有一个 socket。</div>
+</div>
+
+<p>两个细节把这个协议从"能用"提升到"好用"。其一，领队侧不是弹一个简陋的"允许 ada 执行 Bash？"文本框，而是把请求<strong>灌进本地权限系统的标准队列</strong>（<code>ToolUseConfirmQueue</code>），复用全部原生 UI——Bash 命令高亮、文件编辑 diff 视图，只多一个"来自 ada"的徽章。跨进程的请求和本地的请求在用户眼里没有任何区别，这是第七章权限系统统一入口的直接红利。其二，响应消息携带 <code>updated_input</code> 和 <code>permission_updates</code>——用户在领队屏幕上不仅能批准，还能<strong>修改命令再批准</strong>、能勾选"以后都允许"，这些决定会通过 <code>team_permission_update</code> 广播给全队生效。</p>
+
+<p>顺着这条线还能看到<strong>信任模型的边界</strong>，源码处理得很诚实：信箱文件谁都能写，<code>from</code> 字段是自愿声明，所以关键协议都做了来源校验——计划审批只认 <code>from === 'team-lead'</code>（"prevent teammates from forging approvals"），模式下发同样只认领队。但这层校验防的是<strong>混乱</strong>（队友互相误发、模型幻觉出一条审批），不是<strong>恶意</strong>——同一台机器、同一个用户账户下的进程本来就在同一信任域里，真正的安全边界在第七章的权限系统，不在信箱。</p>
+
+<h3>6.4.2 优雅关机——对一个 LLM，你不能直接 kill</h3>
+
+<p>解散团队时，领队对每个队友发的不是 SIGKILL，是一封<strong>请求信</strong>，然后是一次三步握手：</p>
+
+<pre><code class="language-text">优雅关机握手（leader ⇄ teammate，全程走信箱）
+
+① leader → shutdown_request { requestId, reason }
+     队友的等待循环里它有插队权（6.2），不会被聊天消息淹没；
+     但它走"双面投递"——最终决定权在队友的模型手里。
+
+② 队友模型读到请求，检查手头工作，二选一：
+     approveShutdown → shutdown_approved { paneId, backendType }
+     rejectShutdown  → shutdown_rejected { reason: "还有未提交的改动" }
+
+③ leader 收到 approved 后才动手（useInboxPoller.ts:677）：
+     backend.killPane(paneId)      按队友自报的窗格号杀进程
+     removeTeammateFromTeamFile    从名册除名
+     unassignTeammateTasks         回收它名下的任务，重新可指派
+     聚合一条 teammate_terminated  通知领队模型与 UI</code></pre>
+
+<p>为什么要这么绕？因为<strong>被关的是一个正在思考的 LLM，不是一个无状态进程</strong>。它可能正拿着改到一半没提交的代码、写到一半的调研结论；直接 kill，这些就全丢了（第五章的 Worker 被杀有部分结果抢救，但那是单进程内存里的便利，跨进程没有）。把"能不能停"设计成一个<strong>问句</strong>，让队友自己收尾再交回控制权，代价只是一封信的往返，换来的是永远不会杀掉一个手里有活的 Agent。拒绝也不是终点——拒绝理由会出现在领队的上下文里，领队模型可以催、可以等、可以改主意。</p>
+
+<p>③ 里还有一个不起眼但关键的动作：<strong>回收任务</strong>。Team 与 TaskList 一一对应（6.1），队友退场时它名下的任务自动解除指派，回到可认领状态——否则任务会被一个已经不存在的人永远占着。名册、任务、进程三份状态在关机这一刻同步清理，这是"Team = TaskList" 这个 1:1 设计最实际的回报。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>协调器（第五章）与团队（本章）是多 Agent 的两种拓扑，差异全在"成员是什么"：Worker 是<strong>一次性的执行器</strong>——跑完即死、无身份、被动接活；队友是<strong>常驻的对等体</strong>——有名字、能互聊、闲时等活、退场要谈判。前者适合可拆解的单一大任务，后者适合边界清晰的长期分工。注意两者共用同一个 SendMessage、同一套"消息进对方下一轮输入"的语义——拓扑变了，通信原语一个没换。</p>
+  <p><span class="role">给产品经理</span>"权限弹窗瞬移到领队屏幕"是这一章最值得抄的产品决策：多 Agent 系统的审批必须收敛到用户正在看的那一块屏幕，否则并行度越高，用户越像在玩打地鼠。</p>
+</div>
+
+<hr>
+
+<h2>本章代码</h2>
+
+<p>本章的示例在 <code>code/examples/mailbox_demo.py</code>。它用一个临时目录模拟 <code>~/.claude/teams/</code>，跑两个只通过文件通信的"进程"（领队 + 队友）：加锁写信、轮询收信、数据面/控制面分拣、权限瞬移往返、优雅关机三步握手——纯本地运行，无需 API Key。</p>
+
+<pre><code class="language-python"># 纯本地运行，无需 API Key
+cd code
+uv run python examples/mailbox_demo.py</code></pre>
+
+<p>骨架与源码的对应关系：</p>
+
+<pre><code class="language-text"># mailbox_demo.py 骨架                    ←→  src/ 路径
+
+def inbox_path(team, name)                # getInboxPath()
+                                          #   utils/teammateMailbox.ts:56
+def write_to_mailbox(...)                 # writeToMailbox()：锁 + 重读 + 追加
+                                          #   utils/teammateMailbox.ts:134
+def classify(text)                        # isStructuredProtocolMessage()
+  #   数据面 → <teammate-message>          #   utils/teammateMailbox.ts:1073
+  #   控制面 → 协议处理器                  #   hooks/useInboxPoller.ts 分拣循环
+
+async def leader_poller(...)              # useInboxPoller：1s 轮询，
+  #   先递送再标已读（at-least-once）      #   闲时成轮 / 忙时排队
+async def teammate_wait_loop(...)         # waitForNextPromptOrShutdown
+  #   500ms 阻塞循环，shutdown 插队       #   utils/swarm/inProcessRunner.ts:689
+
+permission_request / response 往返        # useSwarmPermissionPoller +
+                                          #   swarm/permissionSync.ts
+shutdown 三步握手                          # sendShutdownRequestToMailbox +
+                                          #   useInboxPoller.ts:677（善后三连）</code></pre>
+
 <div class="page-nav">
   <button class="page-nav-btn" onclick="showPage('ch5')">
     <span class="nav-dir">← 上一章</span>

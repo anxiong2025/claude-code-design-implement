@@ -4,9 +4,7 @@
   实现目标：一个 Coordinator 同时管多个 Worker，Worker 异步汇报结果，Coordinator 综合后再派新任务。
 </p>
 
-<h2>引言 · 一份提示词，不是一个框架</h2>
-
-<p>第四章末尾留了一个悬念：异步派发（一句话回顾——<code>run_in_background: true</code> 让派生调用立即返回 <code>task_id</code>，子 Agent 的结果在完成后以 <code>task-notification</code> 的形式注入父的后续轮次）给了父 Agent "不等"的能力。但"不等"只是机制，真正的问题是：当三五个 Worker 同时在后台干活、结果乱序抵达时，<strong>谁来拆解任务、消化结果、决定下一步</strong>？主 Agent 的人格必须变——从亲自动手的工程师，变成带团队的 Tech Lead。</p>
+<p>给主 Agent 一个大任务："项目里三个互不依赖的模块，各重构一遍。"三份活完全可以同时干，而"同时"的机制第四章已经给了——异步派发（一句话回顾：<code>run_in_background: true</code> 让派生调用立即返回 <code>task_id</code>，子 Agent 的结果在完成后以 <code>task-notification</code> 的形式注入父的后续轮次）。但机制解决不了管理问题：当三五个 Worker 同时在后台干活、结果乱序抵达时，<strong>谁来拆解任务、消化结果、决定下一步</strong>？主 Agent 的人格必须变——从亲自动手的工程师，变成带团队的 Tech Lead。这个新人格，就是本章的主角：协调器（Coordinator）。</p>
 
 <p>Claude Code 对这个问题的回答出人意料地"薄"。翻开源码你会发现，协调器模式没有引入任何新的执行引擎：<code>coordinator/coordinatorMode.ts</code> 全文约 370 行，其中<strong>约 250 行是一个模板字符串——协调器的系统提示词</strong>。剩下的是一个环境变量开关和一段"告诉协调器 Worker 有哪些工具"的上下文注入。派生复用第四章的 AgentTool，追加指令复用 SendMessage 工具，停止复用 TaskStop 工具。<strong>协调器不是一个类，是一份提示词。</strong>这是本章最重要的一课：多 Agent 编排的复杂度大头在提示词工程，不在代码。</p>
 

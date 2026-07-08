@@ -4,8 +4,6 @@
   实现目标：Agent 能调 Bash、读写文件等多种工具，且读操作并发、写操作串行，互不干扰。
 </p>
 
-<h2>引言 · 一个矛盾</h2>
-
 <p>模型在同一轮里发出三个工具调用——<code>Read("src/query.ts")</code>、<code>Grep("isConcurrencySafe")</code>、<code>Edit("src/Tool.ts", ...)</code>。全部串行执行，慢；全部并发执行，两个读操作没问题，但 Edit 与任何同时进行的写操作相撞，结果就是损坏的文件。这就是工具系统的核心矛盾：<strong>最大化并发（速度）× 保证写操作互斥（正确）</strong>。</p>
 
 <p>Claude Code 的解法不是一把大锁，也不是让工具各自管理锁，而是把决策拆成两半：<strong>工具只声明属性，调度器只执行策略</strong>。每个工具通过 <code>isConcurrencySafe</code> 谓词在定义阶段声明"我能不能与别人并发"，调度器据此在运行时把一组调用<strong>分批（partition）</strong>——连续的只读工具合并成并发批次，每个写工具独占一个串行批次。两者互不知晓对方的存在，却共同构成正确的执行计划。</p>

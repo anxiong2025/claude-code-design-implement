@@ -251,7 +251,7 @@ const LEFT_PANEL_WIDTH = 30          // 左栏：选项列表固定 30 列
 const GAP = 4                        // 中间留 4 列空隙
 const previewMaxWidth = columns - LEFT_PANEL_WIDTH - GAP   // 右栏吃掉剩余终端宽度</code></pre>
 
-<p>两个细节值得停一下。其一，<code>hasAnyPreview</code> 的第一个条件是 <code>!multiSelect</code>——<strong>预览只对单选开放</strong>。因为并排预览的心智模型是"高亮某一项 → 右边显示它的实物"，一次只能聚焦一项；多选要同时勾好几个，"右边该显示谁"没有答案。源码在多选路径里干脆连 "Other" 都不追加（<code>PreviewQuestionView.tsx:69</code>："Only real options — no 'Other' for preview questions"），保持并排视图的纯粹。其二，预览内容要么是 markdown、要么是 HTML 片段，由 <code>getQuestionPreviewFormat()</code> 决定；HTML 模式下还有一道 <code>validateHtmlPreview</code>（这两个都在 <code>AskUserQuestionTool.tsx</code>，校验在 <code>:250</code>）把关：<strong>禁止 <code>&lt;html&gt;/&lt;body&gt;/&lt;!doctype&gt;</code> 整页、禁止 <code>&lt;script&gt;/&lt;style&gt;</code></strong>——预览是嵌进宿主界面的片段，不能让模型生成的内容跑脚本或改样式污染整个页面。</p>
+<p>两个细节值得停一下。其一，<code>hasAnyPreview</code> 的第一个条件是 <code>!multiSelect</code>——<strong>预览只对单选开放</strong>。因为并排预览的心智模型是"高亮某一项 → 右边显示它的实物"，一次只能聚焦一项；多选要同时勾好几个，"右边该显示谁"没有答案。源码在多选路径里干脆连 "Other" 都不追加（<code>PreviewQuestionView.tsx:69</code>："Only real options — no 'Other' for preview questions"），保持并排视图的纯粹。其二，预览内容要么是 markdown、要么是 HTML 片段，由 <code>getQuestionPreviewFormat()</code>（定义在 <code>bootstrap/state.ts:1120</code>，被 <code>AskUserQuestionTool.tsx</code> import 后调用）决定；HTML 模式下还有一道 <code>validateHtmlPreview</code>（定义在 <code>AskUserQuestionTool.tsx:250</code>）把关：<strong>禁止 <code>&lt;html&gt;/&lt;body&gt;/&lt;!doctype&gt;</code> 整页、禁止 <code>&lt;script&gt;/&lt;style&gt;</code></strong>——预览是嵌进宿主界面的片段，不能让模型生成的内容跑脚本或改样式污染整个页面。</p>
 
 <div class="figure">
   <div class="figure-head">

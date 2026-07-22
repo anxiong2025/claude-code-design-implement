@@ -293,7 +293,7 @@ return recoverOrphanedParallelToolResults(messages, transcript, seen)</code></pr
 
 <p>图右侧的<strong>灾后重建</strong>是最容易被忽略、又最影响体验的一半。摘要写完后上下文被清空，模型对文件系统的"工作记忆"（<code>readFileState</code>）也没了——不重建的话，它醒来第一件事就是把刚才读过的文件挨个重读一遍，压缩省下的 token 立刻还回去。所以 compact 之后自动重注入：最近读过/改过的至多 5 个文件（总预算 50K token、单文件 5K）、进行中的 plan 文件、plan 模式提醒（不然模型压缩完就忘了自己在 plan 模式里）、用过的 skills，以及把工具/Agent/MCP 清单对"空历史"重播一遍——第二章的增量通告机制（一句话回顾：工具清单只在变化时以 delta 附件通告）在空历史上 diff，天然等于全量重播，一行特殊代码都不用加。</p>
 
-<p>全量压缩之外还有两档更轻的手段，构成一个梯度：<strong>microcompact</strong> 不调模型，直接把老的工具结果原地替换成一行 <code>[Old tool result content cleared]</code>——只清一张白名单里的 8 类工具（<code>COMPACTABLE_TOOLS</code>：Read / Bash / Grep / Glob / WebSearch / WebFetch / Edit / Write），保留最近 N 个。选这 8 类的共同点是<strong>结果可从现场重取</strong>：文件此刻长什么样、命令输出是什么，需要时再读一遍就有——清掉的是"当时的快照"，不是"改过的事实"（Edit/Write 的落盘早已发生，清的只是那条回执文本）；再往下沉是 <strong>API 侧的 context editing</strong>（<code>clear_thinking</code> / <code>clear_tool_uses</code> 策略），擦除动作直接发生在服务端。三档的成本阶梯很清晰：先擦可再生的（免费），再摘要不可再生的（一次模型调用），实在不行才掐头截断（有损）——每一层都比下一层便宜，也都比下一层保真。</p>
+<p>全量压缩之外还有两档更轻的手段，构成一个梯度：<strong>microcompact</strong> 不调模型，直接把老的工具结果原地替换成一行 <code>[Old tool result content cleared]</code>——只清一张白名单里的 9 类工具（<code>COMPACTABLE_TOOLS</code>：Read / Bash / PowerShell / Grep / Glob / WebSearch / WebFetch / Edit / Write，其中 PowerShell 为 Windows-only，与 Bash 一同由 <code>SHELL_TOOL_NAMES</code> 展开），保留最近 N 个。选这几类的共同点是<strong>结果可从现场重取</strong>：文件此刻长什么样、命令输出是什么，需要时再读一遍就有——清掉的是"当时的快照"，不是"改过的事实"（Edit/Write 的落盘早已发生，清的只是那条回执文本）；再往下沉是 <strong>API 侧的 context editing</strong>（<code>clear_thinking</code> / <code>clear_tool_uses</code> 策略），擦除动作直接发生在服务端。三档的成本阶梯很清晰：先擦可再生的（免费），再摘要不可再生的（一次模型调用），实在不行才掐头截断（有损）——每一层都比下一层便宜，也都比下一层保真。</p>
 
 <div class="insight">
   <div class="insight-label">设计启示</div>

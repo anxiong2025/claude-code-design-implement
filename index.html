@@ -6835,7 +6835,18 @@ def map_tool_result(answers, id)          # "User has answered your questions: �
   function zoomFigure(btn) {
     const svg = btn.closest('.figure').querySelector('svg');
     if (!svg) return;
-    document.getElementById('lb-inner-content').innerHTML = svg.outerHTML;
+    // 克隆后清掉绘制动画的内联样式，保证放大视图永远是完整图（哪怕正在动画中）
+    const clone = svg.cloneNode(true);
+    clone.querySelectorAll('[style]').forEach(el => {
+      el.style.strokeDasharray = '';
+      el.style.strokeDashoffset = '';
+      el.style.markerEnd = '';
+      el.style.opacity = '';
+      el.style.transition = '';
+    });
+    const box = document.getElementById('lb-inner-content');
+    box.innerHTML = '';
+    box.appendChild(clone);
     document.getElementById('diagram-lightbox').classList.add('open');
     document.body.style.overflow = 'hidden';
   }
@@ -6937,9 +6948,106 @@ def map_tool_result(answers, id)          # "User has answered your questions: �
     headings.forEach(h => _spyObserver.observe(h));
   }
 
+  // ── 图表渐进绘制动画：滚动到图时，连接线逐段画出，像图正被生成 ──
+  //   只加行为、零改内容；节点静态出现，连接线描边生长。
+  var _drawReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var _drawObserver = null;
+
+  // 含 ch1 交互/悬停语义的图整张跳过（ReAct 播放器、退出条件出口图）
+  function _figExcluded(svg) {
+    return !!svg.querySelector('.ch1-node, .ch1-msg, .exitnode, .exitline');
+  }
+
+  // path/line/polyline 是否为"连接线"（要画的），排除填充形状与 defs 里的箭头三角
+  function _isConnector(el) {
+    if (el.closest('defs') || el.closest('marker')) return false;
+    var cs = getComputedStyle(el);
+    if (!cs.stroke || cs.stroke === 'none') return false;          // 没描边不画
+    if (el.tagName.toLowerCase() === 'line') return true;          // 线段恒为连接线
+    return cs.fill === 'none';                                     // path/polyline 需 fill:none
+  }
+
+  // 取连线长度：优先 getTotalLength，<line> 老浏览器兜底两端点距离
+  function _lineLen(el) {
+    try {
+      if (typeof el.getTotalLength === 'function') {
+        var l = el.getTotalLength();
+        if (l && isFinite(l) && l > 0) return l;
+      }
+    } catch (e) {}
+    if (el.tagName.toLowerCase() === 'line') {
+      return Math.hypot((+el.getAttribute('x2')) - (+el.getAttribute('x1')),
+                        (+el.getAttribute('y2')) - (+el.getAttribute('y1')));
+    }
+    return 0;
+  }
+
+  function drawFigure(fig) {
+    if (fig.dataset.drawn) return;                                 // 幂等：每图只画一次
+    fig.dataset.drawn = '1';
+    var svg = fig.querySelector('svg');
+    if (!svg || _figExcluded(svg)) return;
+    var conns = Array.prototype.filter.call(
+      svg.querySelectorAll('path, line, polyline'), _isConnector);
+    if (!conns.length) return;
+    // 顺序画出，总时间窗封顶（应对封面那种上百条线的大图）
+    var step = Math.min(80, 1500 / Math.max(conns.length - 1, 1));
+    var i = 0;
+    conns.forEach(function(el) {
+      var L = _lineLen(el);
+      var delay = i++ * step;
+      // 源码本就是虚线，或太短（描边生长看不出、读作闪现）→ 改淡入
+      if (!L || L < 40 || el.hasAttribute('stroke-dasharray')) {
+        el.style.opacity = '0';
+        el.style.transition = 'none';
+        el.getBoundingClientRect();
+        setTimeout(function() {
+          el.style.transition = 'opacity .4s ease';
+          el.style.opacity = '1';
+        }, delay);
+        el.addEventListener('transitionend', function te(ev) {
+          if (ev.propertyName !== 'opacity') return;
+          el.removeEventListener('transitionend', te);
+          el.style.transition = ''; el.style.opacity = '';
+        });
+        return;
+      }
+      // 实线：dashoffset 逐段画出；绘制期间内联 marker-end:none 压住悬空箭头
+      // （用内联 style 而非删属性——属性得以保留，lightbox 克隆能还原箭头）
+      el.style.strokeDasharray = L + ' ' + L;
+      el.style.strokeDashoffset = L;
+      el.style.transition = 'none';
+      el.style.markerEnd = 'none';
+      el.getBoundingClientRect();                                  // 强制回流，锁定起始态
+      setTimeout(function() {
+        el.style.transition = 'stroke-dashoffset .55s ease';
+        el.style.strokeDashoffset = '0';
+      }, delay);
+      el.addEventListener('transitionend', function te(ev) {
+        if (ev.propertyName !== 'stroke-dashoffset') return;
+        el.removeEventListener('transitionend', te);
+        el.style.transition = ''; el.style.strokeDasharray = '';
+        el.style.strokeDashoffset = ''; el.style.markerEnd = '';  // 清内联→箭头由原属性归位
+      });
+    });
+  }
+
+  function initDrawAnimation(container) {
+    if (_drawReduced) return;                                      // 尊重"减弱动画"偏好
+    if (!('IntersectionObserver' in window)) return;              // 无 IO：不隐藏任何元素，图全显
+    if (_drawObserver) _drawObserver.disconnect();
+    _drawObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(e) {
+        if (e.isIntersecting) { drawFigure(e.target); _drawObserver.unobserve(e.target); }
+      });
+    }, { rootMargin: '0px 0px -12% 0px', threshold: 0.12 });
+    container.querySelectorAll('.figure').forEach(function(f) { _drawObserver.observe(f); });
+  }
+
   // 章节注入后初始化所有交互式配图（innerHTML 不执行 script，所以在这里驱动）
   function initFigures(container) {
     container.querySelectorAll('.figure.ch1-player').forEach(f => ch1Render(f, 0));
+    initDrawAnimation(container);
   }
 </script>
 </body>

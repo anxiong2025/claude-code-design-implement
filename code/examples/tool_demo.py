@@ -2,10 +2,10 @@
 第三章 · 工具系统运行示例（纯本地模拟，无需 API Key）。
 
 实现迷你版工具系统，与源码结构一一对应：
-  Tool 接口            ←→  src/Tool.ts:281
+  Tool 接口            ←→  src/Tool.ts:362
   build_tool 工厂      ←→  src/Tool.ts:783（fail-closed 默认值）
-  partition_tool_calls ←→  src/services/tools/toolOrchestration.ts:84（保序贪心分批）
-  run_tools 调度器     ←→  src/services/tools/toolOrchestration.ts:23（批内并发、批间串行）
+  partition_tool_calls ←→  src/services/tools/toolOrchestration.ts:91（保序贪心分批）
+  run_tools 调度器     ←→  src/services/tools/toolOrchestration.ts:19（批内并发、批间串行）
   并发上限             ←→  src/utils/generators.ts:32 all(generators, cap)
 
     uv run python examples/tool_demo.py

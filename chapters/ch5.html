@@ -236,17 +236,24 @@
 
 <pre><code class="language-typescript">// coordinator/coordinatorMode.ts — 开关（精简）
 export function isCoordinatorMode(): boolean {
-  return isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE)
+  // 双保险：先看功能位，再看环境变量。功能位关闭时协调器模式根本不存在
+  if (feature('COORDINATOR_MODE')) {
+    return isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE)
+  }
+  return false
 }
 
 // 恢复会话时，模式跟着会话走：不匹配就当场翻转环境变量
 export function matchSessionMode(sessionMode) {
   if (currentIsCoordinator === sessionIsCoordinator) return undefined
-  process.env.CLAUDE_CODE_COORDINATOR_MODE = sessionIsCoordinator ? '1' : undefined
-  return 'Entered coordinator mode to match resumed session.'
+  if (sessionIsCoordinator) process.env.CLAUDE_CODE_COORDINATOR_MODE = '1'
+  else delete process.env.CLAUDE_CODE_COORDINATOR_MODE
+  return sessionIsCoordinator
+    ? 'Entered coordinator mode to match resumed session.'
+    : 'Exited coordinator mode to match resumed session.'
 }</code></pre>
 
-<p>开关打开后发生两件事：主循环的系统提示词被 <code>getCoordinatorSystemPrompt()</code> 整体替换，内置 Agent 列表被替换为 coordinator 专属的 <code>worker</code> 类型。协调器的全部行为规范都在那份约 250 行的提示词里。把它按主题拆开，骨架是这样的：</p>
+<p>开关打开后发生两件事：主循环的系统提示词被 <code>getCoordinatorSystemPrompt()</code> 整体替换，内置 Agent 列表被替换为 coordinator 专属的 <code>worker</code> 类型。协调器的全部编排规范都在那份约 250 行的提示词里。但边界不靠提示词自觉——开关还触发第二件事：主循环工具池被 <code>applyCoordinatorToolFilter</code>（<code>utils/toolPool.ts:35</code>）按白名单 <code>COORDINATOR_MODE_ALLOWED_TOOLS</code>（<code>constants/tools.ts:107</code>）硬裁到只剩 Agent / TaskStop / SendMessage（外加内部的 SyntheticOutput）。所以"协调器绝不亲自写代码"不是靠人格劝阻，是它物理上就没有 Bash / Edit / Read——提示词负责"怎么派工"，代码负责"不许下场"。把提示词按主题拆开，骨架是这样的：</p>
 
 <pre><code class="language-text">getCoordinatorSystemPrompt() 的内容骨架 —— coordinator/coordinatorMode.ts:111
 
@@ -341,16 +348,19 @@ Agent({ prompt: "修复 src/auth/validate.ts:42 的空指针。Session 上的 us
 
 <p>Worker 不是一种新机制，就是第四章的异步 SubAgent，但它的工具白名单经过了刻意裁剪（<code>constants/tools.ts</code>）：</p>
 
-<pre><code class="language-typescript">// Worker 工具池 = 异步 Agent 白名单 - 内部工具
-export const ASYNC_AGENT_ALLOWED_TOOLS = new Set([
+<pre><code class="language-typescript">// Worker 工具池 = filterToolsForAgent 按 ASYNC_AGENT_ALLOWED_TOOLS 白名单筛出的结果
+//   （agentToolUtils.ts:70，isAsync: true 分支）
+export const ASYNC_AGENT_ALLOWED_TOOLS = new Set([  // constants/tools.ts:55
   FILE_READ, GREP, GLOB, BASH, FILE_EDIT, FILE_WRITE,   // 读写与执行
   WEB_SEARCH, WEB_FETCH, SKILL, TOOL_SEARCH,            // 检索与技能
   ENTER_WORKTREE, EXIT_WORKTREE, TODO_WRITE, ...        // 隔离与规划
 ])
-// 注意名单里没有的：Agent（不能再派生）、SendMessage（不能互发消息）
-// —— INTERNAL_WORKER_TOOLS 进一步移除 TeamCreate/TeamDelete/SendMessage</code></pre>
+// 注意这份白名单里从头就没有：Agent（不能再派生）、SendMessage（不能互发消息）
+// —— 它们压根不在白名单里，所以 Worker 天生就没有，这就是星形约束的来源</code></pre>
 
-<p>删掉的两个工具正好定义了拓扑。<strong>没有 Agent 工具</strong>，Worker 无法再派生——这是 4.4 讲过的防递归约束（一句话回顾：派生深度上限为 2，防的是失控的 Agent 树和不可判定的生命周期）在协调器模式下的延续：结构是星形，不是树形。<strong>没有 SendMessage</strong>，Worker 之间无法直连——所有信息必须经过中心，保证了协调器的全局视野不被旁路。星形不是画出来的，是从完整工具池里删出来的。</p>
+<p>缺席的两个工具正好定义了拓扑，而它们是<em>白名单机制</em>拦下的，不是哪段代码专门"删"的——<code>filterToolsForAgent</code>（<code>agentToolUtils.ts:70</code>）在 <code>isAsync</code> 分支只放行白名单里的工具，名单外的一律丢弃。<strong>没有 Agent 工具</strong>，Worker 无法再派生——这是 4.4 讲过的防递归约束（一句话回顾：派生深度上限为 2，防的是失控的 Agent 树和不可判定的生命周期）在协调器模式下的延续：结构是星形，不是树形。<strong>没有 SendMessage</strong>，Worker 之间无法直连——所有信息必须经过中心，保证了协调器的全局视野不被旁路。星形不是画出来的，是"白名单没放它进来"的自然结果。</p>
+
+<p>源码里另有一个容易看岔的 <code>INTERNAL_WORKER_TOOLS</code>（<code>coordinatorMode.ts:29</code>，含 TeamCreate / TeamDelete / SendMessage / SyntheticOutput），它<strong>不裁剪工具池</strong>——Worker 的实际工具早由上面的白名单定死了。它的唯一用途是：协调器一侧生成"Worker 能力说明书"时（<code>getCoordinatorUserContext</code>），把这几个纯内部工具从描述文字里滤掉，免得协调器误以为可以指挥 Worker 去 SendMessage。一个管能力、一个管说明，别把两者当成同一道闸。</p>
 
 <p>与此对称，协调器一侧通过 <code>getCoordinatorUserContext()</code> 收到一份"Worker 能力说明书"注入上下文：Worker 有哪些工具、连了哪些 MCP Server、以及一个所有 Worker 免许可读写的 <strong>scratchpad 目录</strong>——提示词称之为"durable cross-worker knowledge"，一块跨 Worker 的持久黑板。Worker 之间不能对话，但可以往黑板上写调研笔记供后继者读，这是星形拓扑里唯一的"旁路"，而它是文件而非消息——异步、可审计、不破坏拓扑。</p>
 
@@ -410,14 +420,15 @@ export const ASYNC_AGENT_ALLOWED_TOOLS = new Set([
       <text class="ls" x="120" y="93" text-anchor="middle">enqueueAgentNotification()</text>
       <text class="ls" x="120" y="108" text-anchor="middle">notified 原子置位（去重）</text>
       <rect x="28" y="128" width="184" height="140" rx="8" fill="#fff" stroke="#9a8f7b" stroke-opacity=".4"/>
-      <text class="ls" x="40" y="147">&lt;task-notification&gt;</text>
-      <text class="ls" x="52" y="164">&lt;task-id&gt; 续跑用的地址</text>
-      <text class="ls" x="52" y="180">&lt;status&gt; completed|</text>
-      <text class="ls" x="70" y="195">failed|killed</text>
-      <text class="ls" x="52" y="211">&lt;result&gt; 最终文本</text>
-      <text class="ls" x="52" y="227">&lt;usage&gt; tokens/工具数</text>
-      <text class="ls" x="52" y="243">&lt;output-file&gt; 全程落盘</text>
-      <text class="ls" x="40" y="260">&lt;/task-notification&gt;</text>
+      <text class="ls" x="40" y="145">&lt;task-notification&gt;</text>
+      <text class="ls" x="52" y="159">&lt;task-id&gt; 续跑地址</text>
+      <text class="ls" x="52" y="173">&lt;output-file&gt; 落盘</text>
+      <text class="ls" x="52" y="187">&lt;status&gt; completed|</text>
+      <text class="ls" x="70" y="201">failed|killed</text>
+      <text class="ls" x="52" y="215">&lt;summary&gt; 一句话（必有）</text>
+      <text class="ls" x="52" y="229">&lt;result&gt; 最终文本（可选）</text>
+      <text class="ls" x="52" y="243">&lt;usage&gt; tokens（可选）</text>
+      <text class="ls" x="40" y="257">&lt;/task-notification&gt;</text>
 
       <path class="pipe" d="M226,150 L268,150" stroke="#1F8F5F" marker-end="url(#f53a)"/>
       <text class="ld" x="247" y="140" text-anchor="middle" fill="#1F8F5F">②</text>
@@ -579,7 +590,7 @@ if (task.status === 'running') {
 //    从磁盘 transcript 复活，带着全部旧上下文继续
 const result = await resumeAgentBackground({ agentId, prompt: input.message, ... })</code></pre>
 
-<p><strong>路径①的关键词是"工具轮边界"。</strong>Worker 正在跑一个 Bash 命令时收到新指令，指令不会打断命令，而是进入该任务的 <code>pendingMessages</code> 数组；Worker 每轮工具执行结束、准备下一次模型调用时，<code>drainPendingMessages</code> 把攒下的消息全部取走，作为附件拼进下一轮输入（<code>attachments.ts:1085</code>）。这和 5.3 协调器收通知的时机选择是同一个哲学的两个方向：<strong>消息永远在回合边界交接，任何 Agent 的任何一轮都不被打断</strong>。打断意味着半途而废的工具调用和被撕裂的思路，排队意味着每轮开始时世界是完整的。</p>
+<p><strong>路径①的关键词是"工具轮边界"。</strong>Worker 正在跑一个 Bash 命令时收到新指令，指令不会打断命令，而是进入该任务的 <code>pendingMessages</code> 数组；Worker 每轮工具执行结束、准备下一次模型调用时，<code>drainPendingMessages</code> 把攒下的消息全部取走，作为附件拼进下一轮输入（<code>getAgentPendingMessageAttachments</code>，<code>attachments.ts:1090</code>）。这和 5.3 协调器收通知的时机选择是同一个哲学的两个方向：<strong>消息永远在回合边界交接，任何 Agent 的任何一轮都不被打断</strong>。打断意味着半途而废的工具调用和被撕裂的思路，排队意味着每轮开始时世界是完整的。</p>
 
 <p><strong>路径②回收了第四章埋的伏笔。</strong>4.3 说过子 Agent 的 transcript 会落盘（当时的用途是"可查"）；现在它多了一个用途——<strong>可复活</strong>。<code>resumeAgentBackground</code> 从磁盘读回消息数组，做三重清洗（丢弃未解决的 tool_use、孤儿 thinking 块、空白 assistant 消息——都是中断可能留下的残渣），重建工具池和系统提示词，然后像什么都没发生过一样继续对话。对协调器而言，"Worker 停了"不是句号，是逗号：一个 completed 的调研 Worker，三轮之后仍能被一句 <code>SendMessage</code> 唤回来干实现，它读过的三十个文件还在脑子里。</p>
 
@@ -645,7 +656,7 @@ const result = await resumeAgentBackground({ agentId, prompt: input.message, ...
       <path class="pipe" d="M228,110 L330,74" stroke="#9a8f7b" marker-end="url(#f55a)"/>
       <path class="pipe" d="M228,128 L330,128" stroke="#9a8f7b" marker-end="url(#f55a)"/>
       <path class="pipe" d="M228,146 L330,182" stroke="#C8344E" marker-end="url(#f55r)"/>
-      <text class="sd" x="248" y="168" fill="#C8344E">TaskStop / ESC 全杀</text>
+      <text class="sd" x="248" y="168" fill="#C8344E">TaskStop / ctrl+x ctrl+k 全杀（两击）</text>
 
       <rect x="332" y="52" width="118" height="42" rx="10" fill="#fff" stroke="#1F8F5F" stroke-opacity=".55"/>
       <text class="st" x="391" y="70" text-anchor="middle" fill="#1F8F5F" font-size="11">completed</text>
@@ -682,14 +693,14 @@ const result = await resumeAgentBackground({ agentId, prompt: input.message, ...
 
 <p><strong>被杀的 Worker 也交作业。</strong><code>stopTask</code>（<code>tasks/stopTask.ts</code>）里有一段耐人寻味的区别对待：后台 Bash 被杀时，"exit code 137" 通知被抑制——那是噪音；但 Agent 任务被杀时通知照发，因为它携带 <code>extractPartialResult</code> 从已产生的消息里抢救出的部分结果——那是 payload。你半路叫停一个调研 Worker，它读过的东西不会白读。</p>
 
-<p><strong>批量终止合并汇报。</strong>用户按 ESC 时 <code>killAllRunningAgentTasks</code> 停掉所有 Worker，同时用 <code>markAgentsNotified</code> 把每个任务的 notified 标志直接置位——五个 Worker 不会发五条讣告刷屏，系统发一条聚合消息。去重标志在这里被反向利用：先置位，通知就永远不会发出。</p>
+<p><strong>批量终止合并汇报。</strong>用户按 <code>ctrl+x ctrl+k</code>（两击确认，见下节）时 <code>killAllRunningAgentTasks</code> 停掉所有 Worker，同时用 <code>markAgentsNotified</code> 把每个任务的 notified 标志直接置位——五个 Worker 不会发五条讣告刷屏，系统发一条聚合消息。去重标志在这里被反向利用：先置位，通知就永远不会发出。</p>
 
 <p>失败处理的策略同样围绕上下文经济学展开：Worker 报告测试失败时，提示词的第一选择是 <strong>SendMessage 续跑同一个 Worker</strong>——它拥有完整的错误现场（改了什么、报了什么错、试过什么），一句"58 行和 72 行的断言还在失败，改成新的报错文案"就够了；只有当续跑再次失败，才换思路新开或上报用户。对照 5.2.3 的决策表，这正是"修正它自己刚犯的错 → 续跑"那一行。</p>
 
 <div class="insight">
   <div class="insight-label">设计启示</div>
   <p><span class="role">给开发者</span>这个状态机最反直觉的设计是"没有真正的终态"。传统任务系统里 killed 就是死了；这里 kill 只是 abort 掉进程内的循环，<strong>身份（agentId）和记忆（transcript）都在盘上</strong>，SendMessage 一到就原地复活。把"执行"和"身份+记忆"分离之后，停止变得廉价而无损——这是敢于"随手停、随手续"的底气，也间接鼓励协调器大胆派工：派错了就停，成本近乎为零。</p>
-  <p><span class="role">给产品经理</span>ESC 一键全停 + 聚合汇报 + 部分结果保留，这三件事共同回答用户对多 Agent 最深的恐惧："失控了怎么办"。刹车必须比油门显眼，这是自治系统赢得信任的前提。</p>
+  <p><span class="role">给产品经理</span>一键全停 + 聚合汇报 + 部分结果保留，这三件事共同回答用户对多 Agent 最深的恐惧："失控了怎么办"。但注意这个"急刹车"的手感被刻意调过：全停不是按一下就生效，而是 <code>ctrl+x ctrl+k</code> 两击确认——第一击只在状态栏提示"再按一次停止后台 Agent"，3 秒内（<code>KILL_AGENTS_CONFIRM_WINDOW_MS</code>）没有第二击就自动作废。这是在"刹车要显眼"和"别让用户手滑杀光正在干活的 Worker"之间找平衡：破坏性越大的操作，越值得加一道低成本的二次确认。刹车必须比油门显眼，但也不能一碰就翻车——这是自治系统赢得信任的两个前提。</p>
 </div>
 
 <hr>
@@ -726,9 +737,10 @@ def send_message(to, message)             # SendMessageTool.call()
   #   终态    → transcript 复活           #   resumeAgentBackground()
                                           #   tools/AgentTool/resumeAgent.ts:42
 
-WORKER_TOOLS（无 spawn，无 send）          # ASYNC_AGENT_ALLOWED_TOOLS
-                                          #   - INTERNAL_WORKER_TOOLS
-                                          #   constants/tools.ts:55（星形约束）</code></pre>
+WORKER_TOOLS（无 spawn，无 send）          # filterToolsForAgent 按
+                                          #   ASYNC_AGENT_ALLOWED_TOOLS 白名单筛
+                                          #   agentToolUtils.ts:70 / tools.ts:55
+                                          #   （Agent/SendMessage 不在名单=星形约束）</code></pre>
 
 <div class="page-nav">
   <button class="page-nav-btn" onclick="showPage('ch4')">

@@ -1,0 +1,392 @@
+<div class="chapter-eyebrow">第九章</div>
+<h1>生成式交互模式——让 Agent 主动生成"提问"与"计划"</h1>
+<p class="chapter-subtitle">
+  实现目标：把"向人提问""先规划再动手""让人看着选"变成模型可调用的工具，让人成为循环里一种"可被调用的能力"。
+</p>
+
+<p>你让 Agent"给项目加个缓存"。它读了几个文件，然后停下来——屏幕上弹出一张卡片：<strong>缓存后端用哪种？</strong> 左边三个选项 Redis / 内存 / 文件，右边跟着一栏真实配置预览：Redis 那栏写着"多进程共享、需多起一个依赖"，内存那栏写着"零依赖最快、重启即失"。你用方向键上下扫一遍对比，回车选了 Redis。Agent 拿到你的选择，接着往下写。它没有猜，也没有一条道走到黑写完再让你推翻重来——它在真正动手前，把一个只有你能拍板的决定，交还给了你。</p>
+
+<p>这件事的奇妙之处在于：<strong>"提问"本身是模型主动发起的一次工具调用</strong>。一句话回顾第三章的工具契约：工具是一个带 <code>inputSchema</code>、<code>call()</code> 的对象，模型填好参数发起调用，运行时执行后把结果以 <code>tool_result</code>（user 角色）回流进下一轮。前八章里，工具的返回值都是<strong>机器数据</strong>——文件内容、命令输出、子 Agent 的报告。本章的三件工具不一样：它们的"执行"就是<strong>把界面交给人</strong>，返回值是一个活人的<strong>选择</strong>。于是人被塞进了 ReAct 循环，成为和 Read、Bash 平级的一种"可被调用的能力"。</p>
+
+<p>本章拆三件事，都是这个思路的变体：<strong>AskUserQuestion</strong>（问清楚——把模糊需求变成选择题）、<strong>并排预览</strong>（看着选——把选项旁边挂上可对比的实物）、<strong>Plan 模式</strong>（先规划再动手——把"要不要开工"变成一次显式审批）。三者共享同一个机制内核：一次 <code>behavior:'ask'</code> 的工具调用，把控制权和终端让给人，再把人的回应包成 <code>tool_result</code> 送回模型。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">架构总图</span>
+    <span class="figure-title">人被接进 ReAct 循环：提问也是一次工具调用 <span class="hint">— 返回值不是机器数据，是人的选择</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 400" role="img" aria-label="生成式交互架构总图">
+    <style>
+      .f9-0 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f9-0 .lt{font-size:12.5px;font-weight:700}
+      .f9-0 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f9-0 .ld{font-size:10.5px;fill:#5a5346}
+      .f9-0 .pipe{stroke-width:1.6;fill:none}
+    </style>
+    <defs>
+      <marker id="f90b" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#2563EB"/></marker>
+      <marker id="f90p" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#6D45C9"/></marker>
+    </defs>
+    <g class="f9-0">
+      <!-- model -->
+      <rect x="40" y="24" width="200" height="96" rx="12" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="lt" x="140" y="50" text-anchor="middle" fill="#2563EB">模型（ReAct 循环）</text>
+      <text class="ld" x="140" y="72" text-anchor="middle">遇到"只有人能定"的岔路</text>
+      <text class="ls" x="140" y="94" text-anchor="middle">发起工具调用：</text>
+      <text class="ls" x="140" y="108" text-anchor="middle">AskUserQuestion / ExitPlanMode</text>
+
+      <!-- ask barrier -->
+      <rect x="290" y="24" width="180" height="96" rx="12" fill="#F3EEFB" stroke="#6D45C9" stroke-opacity=".55"/>
+      <text class="lt" x="380" y="50" text-anchor="middle" fill="#6D45C9">behavior:'ask'</text>
+      <text class="ld" x="380" y="72" text-anchor="middle">运行时不执行代码，</text>
+      <text class="ld" x="380" y="88" text-anchor="middle">把终端 UI 让给人：</text>
+      <text class="ls" x="380" y="106" text-anchor="middle">选择题 / 并排预览 / 计划审批</text>
+
+      <!-- human -->
+      <rect x="520" y="24" width="160" height="96" rx="12" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".55"/>
+      <text class="lt" x="600" y="50" text-anchor="middle" fill="#1F8F5F">人</text>
+      <text class="ld" x="600" y="74" text-anchor="middle">看选项、比预览、</text>
+      <text class="ld" x="600" y="90" text-anchor="middle">批准或改再批</text>
+      <text class="ls" x="600" y="108" text-anchor="middle">= 一种可被调用的能力</text>
+
+      <path class="pipe" d="M240,72 L286,72" stroke="#6D45C9" marker-end="url(#f90p)"/>
+      <path class="pipe" d="M470,72 L516,72" stroke="#1F8F5F" marker-end="url(#f90b)"/>
+
+      <!-- return path -->
+      <rect x="150" y="200" width="420" height="72" rx="12" fill="#FDFCF9" stroke="#9a8f7b" stroke-opacity=".5"/>
+      <text class="lt" x="360" y="226" text-anchor="middle" fill="#3a3326">人的选择 → 包成 tool_result（user 角色，按 tool_use_id 配对）</text>
+      <text class="ls" x="360" y="248" text-anchor="middle">"User has answered your questions: …"</text>
+      <text class="ld" x="360" y="264" text-anchor="middle">和第三章任何工具的返回值走同一条数据通路</text>
+
+      <path class="pipe" d="M600,120 C600,170 470,180 420,198" stroke="#1F8F5F" stroke-dasharray="6 4" marker-end="url(#f90b)"/>
+      <path class="pipe" d="M150,236 C90,236 90,150 138,116" stroke="#2563EB" marker-end="url(#f90b)"/>
+      <text class="ld" x="96" y="180" fill="#2563EB">回流</text>
+      <text class="ld" x="96" y="196" fill="#2563EB">下一轮</text>
+
+      <text class="ld" x="360" y="320" text-anchor="middle">三件工具，一个内核：把控制权让给人，再把人的回应当数据收回来</text>
+      <text class="ld" x="360" y="352" text-anchor="middle" fill="#C8344E">前八章工具返回"机器算出的事实"；本章工具返回"活人做出的决定"</text>
+      <text class="ld" x="360" y="380" text-anchor="middle">这就是"生成式交互"：交互界面由模型按需生成，而不是产品经理预先写死</text>
+    </g>
+  </svg>
+  <div class="figure-cap">模型在循环里遇到只有人能拍板的岔路，主动发起一次 behavior:'ask' 的工具调用；运行时把终端让给人渲染选择题/预览/计划；人的回应被包成 tool_result 回流进下一轮。人因此成为 ReAct 循环里一种可被调用的能力。</div>
+</div>
+
+<div class="goal-card">
+  <div class="goal-card-label">本章目标</div>
+  <p>读完这章，你会理解：</p>
+  <ul>
+    <li><span class="sec-no">9.1</span><span>为什么"向人提问"要做成一个工具，而不是硬编码在产品流程里</span></li>
+    <li><span class="sec-no">9.2</span><span>AskUserQuestion 的 schema 约束（1–4 问、2–4 选项、唯一性）与两条自动兜底（Other、推荐项置顶）</span></li>
+    <li><span class="sec-no">9.3</span><span>答案如何从 <code>behavior:'ask'</code> 一路变成回流的 <code>tool_result</code></span></li>
+    <li><span class="sec-no">9.4</span><span>并排预览如何让人"看着实物选"，以及它为何只对单选开放</span></li>
+    <li><span class="sec-no">9.5</span><span>Plan 模式怎样把"先规划再动手"做成显式审批，以及它和 AskUserQuestion 的分工</span></li>
+  </ul>
+</div>
+
+<h2 id="s9-1">9.1 从流式到生成式交互——为什么"提问"是一个工具</h2>
+
+<p>先厘清一个容易混的概念。第一章讲过流式输出：模型逐块吐字，用户能实时看、随时打断——那是<strong>把模型的输出流式地展示给人</strong>。本章讲的是反方向的事：<strong>模型主动把一个决定权交还给人，并等人回应</strong>。前者是"看它干活"，后者是"它请你拍板"。</p>
+
+<p>那"请你拍板"为什么要做成工具，而不是在产品代码里写一个 <code>if 需要确认 then 弹窗</code>？因为<strong>什么时候需要问、问什么、给哪几个选项，是语义判断，只有正在干活的模型知道</strong>。产品经理没法预先枚举"用户可能在哪一步遇到歧义"——那等于要提前想清楚所有任务的所有岔路。把提问做成工具，决策就落到了唯一有上下文的角色身上：模型读完代码，发现"缓存后端"这个选择它替用户做不了主，于是<strong>当场生成</strong>一道贴合此刻情境的选择题。这就是"生成式交互"四个字的重量——<strong>交互界面是模型按需生成的，不是产品预先写死的</strong>。</p>
+
+<p>Claude Code 把这类工具的描述写得很直白（<code>AskUserQuestionTool/prompt.ts:7</code>）：</p>
+
+<pre><code class="language-typescript">// src/tools/AskUserQuestionTool/prompt.ts:7
+export const DESCRIPTION =
+  'Asks the user multiple choice questions to gather information, ' +
+  'clarify ambiguity, understand preferences, make decisions or offer them choices.'
+
+// 工具提示词的四条用途（prompt.ts:32 起）
+// 1. Gather user preferences or requirements
+// 2. Clarify ambiguous instructions
+// 3. Get decisions on implementation choices as you work
+// 4. Offer choices to the user about what direction to take.</code></pre>
+
+<p>注意这四条没有一条是"到某个固定步骤就弹窗"，全是"当你（模型）发现自己需要"。工具只是给了模型一个开口，<strong>何时开口由模型的判断决定</strong>——这和把它写成产品流程里的固定关卡，是两种完全不同的产品哲学。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>当"要不要征询用户"取决于运行时的语义上下文时，别把它做成宿主代码里的固定分支——做成一个模型可调用的工具，让判断权落到唯一掌握上下文的角色手里。你付出的是一个 schema 和一段回流逻辑，换来的是"任意任务、任意岔路都能就地问"的通用能力。</p>
+  <p><span class="role">给产品经理</span>传统软件的交互是设计师预先画死的有限状态机；生成式交互里，界面（问哪些、给哪几个选项）由模型按当前任务临时生成。这解锁了"无法穷举的长尾场景"——你不必预想用户会在第几步卡住，模型会在它卡住的地方替你把选择题递到用户面前。评估这类产品，要看"该问的时候问了没、不该问的时候闭嘴没"，而不是界面画得多全。</p>
+</div>
+
+<h2 id="s9-2">9.2 Schema 约束与两条自动兜底</h2>
+
+<p>既然选择题由模型现场生成，就必须有一套 schema 把它<strong>约束成人能一眼看懂、手能快速选</strong>的形状。AskUserQuestion 的输入 schema 全是硬约束（<code>AskUserQuestionTool.tsx:62</code>）：</p>
+
+<pre><code class="language-typescript">// src/tools/AskUserQuestionTool/AskUserQuestionTool.tsx —— 精简
+const questionOptionSchema = z.object({
+  label:       z.string(),          // 选项文字，1–5 词
+  description: z.string(),          // 这个选项意味着什么 / 有何取舍
+  preview:     z.string().optional() // 可选：并排预览内容（见 9.4）
+})
+const questionSchema = z.object({
+  question:    z.string(),          // 完整问句，以问号结尾
+  header:      z.string(),          // 极短标签，UI 里当 chip（≤12 字符）
+  options:     z.array(questionOptionSchema).min(2).max(4),  // 2–4 个选项
+  multiSelect: z.boolean().default(false)                    // 默认单选
+})
+const inputSchema = z.strictObject({
+  questions:   z.array(questionSchema).min(1).max(4),        // 1–4 个问题
+  ...commonFields                                            // answers/annotations/metadata
+}).refine(UNIQUENESS_REFINE.check, { message: UNIQUENESS_REFINE.message })</code></pre>
+
+<p>每个数字都在替用户的注意力把关：<strong>一次最多 4 问</strong>（问题墙会把人吓退）、<strong>每问 2–4 个选项</strong>（少于 2 个不成其为选择，多于 4 个就该换个问法）、<strong>header ≤ 12 字符</strong>（它要塞进一个 chip 标签）。还有一条 <code>.refine</code> 唯一性校验（<code>UNIQUENESS_REFINE</code>，<code>AskUserQuestionTool.tsx:32</code>）：问题文本不能重复、同一问题内的选项 label 不能重复——否则用户根本分不清两个一模一样的选项差在哪。这些校验和第三章任何工具的入参校验走同一条路：<strong>结构不对，第一道关就打回，模型重发</strong>，压根轮不到打扰用户。</p>
+
+<p>schema 之外，还有两条不写在 schema 里、但由代码或提示词强制的<strong>自动兜底</strong>：</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">机制图</span>
+    <span class="figure-title">两条自动兜底：永远有退路，推荐项永远在手边 <span class="hint">— 模型只管出题，兜底由系统补</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 320" role="img" aria-label="AskUserQuestion 自动兜底机制图">
+    <style>
+      .f9-2 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f9-2 .lt{font-size:12px;font-weight:700}
+      .f9-2 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f9-2 .ld{font-size:10px;fill:#5a5346}
+    </style>
+    <g class="f9-2">
+      <!-- model output -->
+      <rect x="30" y="24" width="200" height="240" rx="12" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="lt" x="130" y="48" text-anchor="middle" fill="#2563EB">模型出的题</text>
+      <rect x="46" y="66" width="168" height="30" rx="6" fill="#fff" stroke="#9a8f7b" stroke-opacity=".4"/>
+      <text class="ls" x="130" y="85" text-anchor="middle">Redis (Recommended)</text>
+      <rect x="46" y="102" width="168" height="30" rx="6" fill="#fff" stroke="#9a8f7b" stroke-opacity=".4"/>
+      <text class="ls" x="130" y="121" text-anchor="middle">内存</text>
+      <rect x="46" y="138" width="168" height="30" rx="6" fill="#fff" stroke="#9a8f7b" stroke-opacity=".4"/>
+      <text class="ls" x="130" y="157" text-anchor="middle">文件</text>
+      <text class="ld" x="130" y="196" text-anchor="middle">模型自己不加 Other，</text>
+      <text class="ld" x="130" y="212" text-anchor="middle">也被要求把推荐项</text>
+      <text class="ld" x="130" y="228" text-anchor="middle">放第一、标 (Recommended)</text>
+
+      <!-- arrow -->
+      <path d="M232,144 L286,144" stroke="#6D45C9" stroke-width="1.6" fill="none" marker-end="url(#f92a)"/>
+      <defs><marker id="f92a" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#6D45C9"/></marker></defs>
+      <text class="ld" x="259" y="134" text-anchor="middle" fill="#6D45C9">系统补</text>
+
+      <!-- rendered to user -->
+      <rect x="292" y="24" width="200" height="240" rx="12" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="lt" x="392" y="48" text-anchor="middle" fill="#1F8F5F">用户看到的</text>
+      <rect x="308" y="66" width="168" height="30" rx="6" fill="#fff" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="ls" x="392" y="85" text-anchor="middle">① Redis (Recommended)</text>
+      <rect x="308" y="102" width="168" height="30" rx="6" fill="#fff" stroke="#9a8f7b" stroke-opacity=".4"/>
+      <text class="ls" x="392" y="121" text-anchor="middle">② 内存</text>
+      <rect x="308" y="138" width="168" height="30" rx="6" fill="#fff" stroke="#9a8f7b" stroke-opacity=".4"/>
+      <text class="ls" x="392" y="157" text-anchor="middle">③ 文件</text>
+      <rect x="308" y="174" width="168" height="30" rx="6" fill="#FBEDEF" stroke="#C8344E" stroke-opacity=".45" stroke-dasharray="4 3"/>
+      <text class="ls" x="392" y="193" text-anchor="middle" fill="#C8344E">④ Other（自动追加）</text>
+      <text class="ld" x="392" y="228" text-anchor="middle">"__other__" → 自由输入</text>
+      <text class="ld" x="392" y="244" text-anchor="middle">QuestionView.tsx:206</text>
+
+      <!-- note -->
+      <rect x="520" y="66" width="176" height="176" rx="10" fill="#FDFCF9" stroke="#9a8f7b" stroke-opacity=".45"/>
+      <text class="lt" x="608" y="90" text-anchor="middle" fill="#3a3326">两条铁律</text>
+      <text class="ld" x="536" y="118">① 永远有 Other——</text>
+      <text class="ld" x="536" y="134">  模型给的选项不全时，</text>
+      <text class="ld" x="536" y="150">  用户不会被逼到墙角</text>
+      <text class="ld" x="536" y="176">② 推荐项置顶 + 标注——</text>
+      <text class="ld" x="536" y="192">  模型有主张就说出来，</text>
+      <text class="ld" x="536" y="208">  但用户一眼看清、可否决</text>
+      <text class="ld" x="536" y="232" fill="#C8344E">（预览题不加 Other，见 9.4）</text>
+    </g>
+  </svg>
+  <div class="figure-cap">模型只负责出题；系统自动追加 "Other" 自由输入项（label "__other__"，QuestionView.tsx:206），并要求模型把推荐项放第一、加 "(Recommended)" 标注。前者保证用户永远有退路，后者让模型的主张明示且可否决。</div>
+</div>
+
+<p>第一条：<strong>永远有 "Other"</strong>。渲染选项时系统会在末尾自动追加一个自由输入项（<code>QuestionView.tsx:206</code>，label 为 <code>"__other__"</code>），提示词也明写"Users will always be able to select Other"。模型给的 2–4 个选项不可能穷尽现实，"Other" 是给用户留的逃生门——它不必在模型设想的框里选。第二条：<strong>推荐项置顶</strong>。提示词要求"若你有倾向，把它放第一并在 label 末尾加 (Recommended)"（<code>prompt.ts:41</code>）。这是一个微妙的产品平衡：模型该有主张（否则选择题变成甩锅），但主张必须<strong>明示且可被一眼否决</strong>，而不是藏在默认值里替用户做了主。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>让模型生成 UI，schema 就是安全带：数量上限（≤4 问、≤4 选项）防信息过载，唯一性 refine 防"两个看起来一样的选项"，字符上限护住布局。把这些约束放在 schema 层用校验强制，而不是写在提示词里靠模型自觉——校验失败能自动打回重试，提示词只能祈祷。</p>
+  <p><span class="role">给产品经理</span>"Other 永远在"和"推荐项标注"是两条可迁移的交互伦理：给 AI 生成的选项一定留自由输入的逃生门（否则用户被 AI 的想象力困住），让 AI 的倾向看得见、能一键推翻（否则"智能默认"就成了越俎代庖）。好的 AI 交互不是替用户决定，是把决定<strong>整理成好拍板的样子</strong>递过去。</p>
+</div>
+
+<h2 id="s9-3">9.3 答案回流——从 behavior:'ask' 到 tool_result</h2>
+
+<p>题出好了，接下来是最能体现"人是一种工具"的一环：<strong>人的选择怎么变回模型能读的数据</strong>。关键是一个权限判定的返回值 <code>behavior:'ask'</code>（<code>AskUserQuestionTool.tsx:182</code>）：</p>
+
+<pre><code class="language-typescript">// src/tools/AskUserQuestionTool/AskUserQuestionTool.tsx —— 精简
+async checkPermissions(input) {
+  return { behavior: 'ask' as const, message: 'Answer questions?', updatedInput: input }
+}
+// 'ask' 不是"问要不要用这个工具"，而是"这次工具的执行就是问人"——
+// 运行时据此把终端让给 AskUserQuestion 的界面，阻塞等人选完
+
+// 人选完之后，答案被包成 tool_result（tsx:224）
+mapToolResultToToolResultBlockParam({ answers, annotations }, toolUseID) {
+  const answersText = Object.entries(answers)
+    .map(([q, a]) => `"${q}"="${a}"`).join(', ')
+  return {
+    type: 'tool_result',
+    content: `User has answered your questions: ${answersText}. ` +
+             `You can now continue with the user's answers in mind.`,
+    tool_use_id: toolUseID,          // 第一章的铁律：靠 id 配对
+  }
+}</code></pre>
+
+<p>回顾第七章的权限流水线（一句话回顾：每次工具调用前先过 <code>checkPermissions</code>，返回 allow / deny / ask 三种表态之一）。<code>behavior:'ask'</code> 在别的工具那里意思是"这步有风险，弹窗问用户批不批"；在 AskUserQuestion 这里，<strong>"问用户"本身就是工具的全部功能</strong>——运行时看到 ask，就把终端交给这个工具的界面，阻塞循环，等人选完。人选完后，选择经由 <code>mapToolResultToToolResultBlockParam</code> 拼成一句自然语言塞进 <code>tool_result</code>，以 user 角色、按 <code>tool_use_id</code> 配对回流——<strong>和第一章讲的任何工具结果注入，一模一样</strong>。模型下一轮读到的不是"用户点了按钮"这种 UI 事件，而是"用户回答了你的问题：'缓存后端用哪种？'='Redis'"这种它天然就懂的话。</p>
+
+<p>细节里藏着好设计：多选的多个 label 用 <code>", "</code> 连接成一个字符串（<code>AskUserQuestionPermissionRequest.tsx:426</code>）；单问题单选且立即提交时直接回流、免掉"下一题"的翻页；选了 "Other" 则用用户的自由输入文本替代 label。无论哪条路径，最终都收敛成 <code>answers</code> 这个 <code>问题→答案</code> 的字典，再拼成那一句话。<strong>UI 的复杂性（方向键、多选、翻页、自由输入）全部在回流这一步被抹平成模型只需要读一句话。</strong></p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>人机交互的返回值要"翻译成模型的母语"。别把原始 UI 事件（点击了第几个按钮、勾选了哪些框）丢给模型，那需要它反推语义；直接拼成 <code>"问题"="答案"</code> 的自然语言，模型零成本理解。复用既有的 tool_result 通路（而非发明一种新消息类型）意味着人的输入和文件读取、命令输出在循环里完全同构——不需要为"人"在循环里开一条特殊分支。</p>
+  <p><span class="role">给产品经理</span>无论交互界面多花哨（并排预览、多选、翻页），回到模型那里都收敛成一句"用户选了 X"。这条"UI 复杂、回流简单"的分界线是可复制的：交互层可以尽情为人优化体验，但喂回智能层的必须是被提炼过的语义。这也解释了为什么加一种新的问法（比如滑块、日期选择器）不需要动模型——回流契约不变，模型无感。</p>
+</div>
+
+<h2 id="s9-4">9.4 并排预览——让人"看着实物选"</h2>
+
+<p>开篇那张卡片右边的配置预览，是这套机制里体验最重的一块。当选项之间的差别"说不清、要看才懂"时（三种缓存后端的配置、两种布局的样子、几段实现的代码），光有一行文字描述不够——得把<strong>实物摆在选项旁边让人对比</strong>。这就是 <code>preview</code> 字段的用途：给某个选项挂一段预览内容，UI 自动切换成左右并排的布局。</p>
+
+<pre><code class="language-typescript">// src/components/permissions/AskUserQuestionPermissionRequest/QuestionView.tsx:235
+const hasAnyPreview = !question.multiSelect && question.options.some(o => o.preview)
+if (hasAnyPreview) { /* 渲染 PreviewQuestionView：左选项、右预览 */ }
+
+// PreviewQuestionView.tsx:233 —— 左右分栏的宽度就俩常量
+const LEFT_PANEL_WIDTH = 30          // 左栏：选项列表固定 30 列
+const GAP = 4                        // 中间留 4 列空隙
+const previewMaxWidth = columns - LEFT_PANEL_WIDTH - GAP   // 右栏吃掉剩余终端宽度</code></pre>
+
+<p>两个细节值得停一下。其一，<code>hasAnyPreview</code> 的第一个条件是 <code>!multiSelect</code>——<strong>预览只对单选开放</strong>。因为并排预览的心智模型是"高亮某一项 → 右边显示它的实物"，一次只能聚焦一项；多选要同时勾好几个，"右边该显示谁"没有答案。源码在多选路径里干脆连 "Other" 都不追加（<code>PreviewQuestionView.tsx:69</code>："Only real options — no 'Other' for preview questions"），保持并排视图的纯粹。其二，预览内容要么是 markdown、要么是 HTML 片段，由 <code>getQuestionPreviewFormat()</code> 决定；HTML 模式下还有一道 <code>validateHtmlPreview</code>（这两个都在 <code>AskUserQuestionTool.tsx</code>，校验在 <code>:250</code>）把关：<strong>禁止 <code>&lt;html&gt;/&lt;body&gt;/&lt;!doctype&gt;</code> 整页、禁止 <code>&lt;script&gt;/&lt;style&gt;</code></strong>——预览是嵌进宿主界面的片段，不能让模型生成的内容跑脚本或改样式污染整个页面。</p>
+
+<div class="figure">
+  <div class="figure-head">
+    <span class="figure-tag">机制图</span>
+    <span class="figure-title">并排预览：左栏定宽选项，右栏动态实物 <span class="hint">— 只对单选开放</span></span>
+    <button class="figure-btn ghost" style="margin-left:auto;padding:3px 9px;font-size:13px" onclick="zoomFigure(this)" title="放大">⤢</button>
+  </div>
+  <svg viewBox="0 0 720 300" role="img" aria-label="并排预览布局机制图">
+    <style>
+      .f9-4 text{font-family:'Inter','Noto Sans SC',system-ui,sans-serif}
+      .f9-4 .lt{font-size:12px;font-weight:700}
+      .f9-4 .ls{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;fill:#6e6353}
+      .f9-4 .ld{font-size:10px;fill:#5a5346}
+    </style>
+    <g class="f9-4">
+      <!-- terminal frame -->
+      <rect x="30" y="24" width="660" height="212" rx="10" fill="#FDFCF9" stroke="#9a8f7b" stroke-opacity=".5"/>
+      <text class="ld" x="360" y="18" text-anchor="middle">终端总宽 = columns</text>
+
+      <!-- left panel -->
+      <rect x="46" y="40" width="200" height="180" rx="8" fill="#EEF3FD" stroke="#2563EB" stroke-opacity=".5"/>
+      <text class="lt" x="146" y="60" text-anchor="middle" fill="#2563EB">左栏 LEFT_PANEL_WIDTH=30</text>
+      <rect x="58" y="74" width="176" height="26" rx="5" fill="#fff" stroke="#2563EB" stroke-opacity=".6"/>
+      <text class="ls" x="146" y="91" text-anchor="middle" fill="#2563EB">▸ Redis（高亮）</text>
+      <rect x="58" y="106" width="176" height="26" rx="5" fill="#fff" stroke="#9a8f7b" stroke-opacity=".35"/>
+      <text class="ls" x="146" y="123" text-anchor="middle">内存</text>
+      <rect x="58" y="138" width="176" height="26" rx="5" fill="#fff" stroke="#9a8f7b" stroke-opacity=".35"/>
+      <text class="ls" x="146" y="155" text-anchor="middle">文件</text>
+      <text class="ld" x="146" y="188" text-anchor="middle">方向键上下</text>
+      <text class="ld" x="146" y="204" text-anchor="middle">换高亮项</text>
+
+      <!-- gap -->
+      <text class="ld" x="262" y="134" text-anchor="middle" fill="#C77D2B">GAP</text>
+      <text class="ld" x="262" y="148" text-anchor="middle" fill="#C77D2B">=4</text>
+
+      <!-- right panel -->
+      <rect x="286" y="40" width="388" height="180" rx="8" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
+      <text class="lt" x="480" y="60" text-anchor="middle" fill="#1F8F5F">右栏 = columns − 30 − 4</text>
+      <text class="ls" x="304" y="86">backend: redis</text>
+      <text class="ls" x="304" y="104">url: redis://localhost:6379</text>
+      <text class="ls" x="304" y="122">ttl: 3600s</text>
+      <text class="ls" x="304" y="146">共享: ✅ 多进程</text>
+      <text class="ls" x="304" y="164">持久化: ✅</text>
+      <text class="ld" x="480" y="196" text-anchor="middle">高亮哪一项 → 这里就换成哪项的实物</text>
+      <text class="ld" x="480" y="212" text-anchor="middle">（markdown 或受限 HTML 片段）</text>
+
+      <text class="ld" x="360" y="262" text-anchor="middle">hasAnyPreview = !multiSelect &amp;&amp; options.some(preview)——多选没有"该显示谁"的答案</text>
+      <text class="ld" x="360" y="286" text-anchor="middle" fill="#C8344E">validateHtmlPreview：禁 &lt;html&gt;/&lt;body&gt; 整页、禁 &lt;script&gt;/&lt;style&gt;——预览是片段，不许跑脚本改样式</text>
+    </g>
+  </svg>
+  <div class="figure-cap">左栏是固定 30 列的选项列表，右栏吃掉终端剩余宽度显示当前高亮项的预览实物。上下移动高亮，右栏实时切换。预览只对单选开放，因为多选无法确定"右边显示谁"；HTML 预览经 validateHtmlPreview 限制为安全片段。</div>
+</div>
+
+<p>把这块拆开看，它回答的是一个很产品的问题：<strong>用户凭什么做这个选择？</strong>纯文字选项要求用户在脑子里想象每个选项的后果；并排预览把后果<strong>直接摆出来</strong>——选 Redis 是这份配置、选内存是那份配置，差异肉眼可见。决策质量因此提升，而这一切依然由模型<strong>生成</strong>：预览内容是模型现场写的配置/代码/mockup，不是产品预先备好的素材。</p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>让 AI 生成的可视内容嵌进宿主 UI，一定要有一道"片段而非整页"的校验：禁 <code>&lt;html&gt;/&lt;body&gt;</code>、禁 <code>&lt;script&gt;/&lt;style&gt;</code>。源码注释说得实在——HTML5 解析器按规范会容错吞下几乎任何东西，所以这道校验不是解析，是在<strong>检查模型意图</strong>并挡掉明确不该出现的东西。生成式 UI 的安全边界要自己划，别指望渲染器兜底。</p>
+  <p><span class="role">给产品经理</span>"看着选"比"读着选"决策质量高一个量级，尤其当选项差异是"要看才懂"的那种。但预览有代价——它只对单选开放，因为并排视图一次只能聚焦一项。这里的取舍很典型：<strong>为了让对比足够清晰，宁可牺牲多选的灵活</strong>。做 AI 选择类交互时，先问"选项差异用一行字说得清吗"，说不清才上预览，且默认单选。</p>
+</div>
+
+<h2 id="s9-5">9.5 Plan 模式——把"先规划再动手"做成显式审批</h2>
+
+<p>AskUserQuestion 解决"某个具体决定该问谁"；还有一类更大的信任问题：<strong>整件事该不该现在就开工</strong>。你说"给应用加用户认证"，这不是一道选择题能收口的——它牵扯架构选择、要动好几个文件、做错了返工成本高。这时候合适的不是问一道题，而是让 Agent <strong>先探索、先出一份完整计划，等你点头再动手</strong>。这就是 Plan 模式，由一对工具支撑：<code>EnterPlanMode</code>（进）和 <code>ExitPlanMode</code>（出）。</p>
+
+<pre><code class="language-typescript">// src/tools/EnterPlanModeTool/EnterPlanModeTool.ts —— 精简
+const inputSchema = z.strictObject({})   // 空 schema：进 plan 模式不需要任何参数
+async call(_input, context) {
+  if (context.agentId) {
+    throw new Error('EnterPlanMode tool cannot be used in agent contexts')  // 子 Agent 不能进
+  }
+  handlePlanModeTransition(appState.toolPermissionContext.mode, 'plan')
+  // 切成 plan 模式：只读探索，除计划文件外不许写任何文件
+}
+
+// src/tools/ExitPlanModeTool/ExitPlanModeV2Tool.ts —— 精简
+// 注意：ExitPlanMode 不把计划当参数传——计划早已写进磁盘上的计划文件，
+// 这个工具只是"我写完了，请审批"的信号
+async checkPermissions() {
+  return { behavior: 'ask' as const }    // 又是 'ask'：把计划推给用户批准
+}</code></pre>
+
+<p>两个细节点出 Plan 模式的定位。其一，<code>EnterPlanMode</code> 的输入 schema 是<strong>空的</strong>——进入规划态不需要模型提供任何东西，它就是个纯粹的模式开关；而且 <code>context.agentId</code> 存在（即子 Agent 上下文）时直接抛错，<strong>只有主 Agent 能进 plan 模式</strong>（一句话回顾第四章：子 Agent 是隔离的执行单元，没有终端也没人给它批计划）。其二，<code>ExitPlanMode</code> 不接收计划内容作参数——计划早已被模型写进磁盘上的计划文件，这个工具<strong>只发一个"写完了，请审批"的信号</strong>，同样走 <code>behavior:'ask'</code> 把计划推到用户面前。审批通过后，权限模式从 plan 恢复成进入前的模式（<code>prePlanMode</code>），Agent 才获得写权限开始动手。</p>
+
+<p>最见功力的是 AskUserQuestion 和 ExitPlanMode 的<strong>分工</strong>，提示词把边界划得很死（<code>ExitPlanModeTool/prompt.ts:22</code>）：</p>
+
+<pre><code class="language-text">// src/tools/ExitPlanModeTool/prompt.ts:22
+Do NOT use AskUserQuestion to ask "Is this plan okay?" or "Should I proceed?"
+- that's exactly what THIS tool does. ExitPlanMode inherently requests approval.
+
+// src/tools/EnterPlanModeTool/prompt.ts:54
+If you would use AskUserQuestion to clarify the approach, use EnterPlanMode instead</pre></code>
+
+<p>翻译成一句话：<strong>AskUserQuestion 管"澄清"，ExitPlanMode 管"批准"，两者不能互相冒充</strong>。规划阶段有具体拿不准的点（用哪种认证？OAuth 还是 JWT？）——用 AskUserQuestion 问,这是澄清；计划整体写好了要用户拍板——用 ExitPlanMode，这是批准。反过来都是错的：拿 AskUserQuestion 去问"我的计划行不行"是把审批降格成了一道选择题（而且用户在点 ExitPlanMode 之前根本看不到计划全文）；在还没搞清方向时就 ExitPlanMode，是拿一份自己都没想清的计划去要签字。<strong>同一个 <code>behavior:'ask'</code> 内核，两种工具按"澄清 vs 批准"的语义分工——这正是生成式交互的成熟之处：不只有"问"这一个动作，而是把人在决策链上的不同角色（顾问、审批人）都建模成了工具。</strong></p>
+
+<div class="insight">
+  <div class="insight-label">设计启示</div>
+  <p><span class="role">给开发者</span>把"人的介入"再往下切分：澄清（提问、可多次、局部）和批准（一次、全局、有法律感的"我同意开工"）是两种不同的交互，别用一个工具混着做。EnterPlanMode 空 schema + 子 Agent 禁用 + ExitPlanMode 不传计划正文（从文件读），这些约束共同保证了"规划态"是一个干净的、只读的、可被审批的阶段，而不是"边想边改还顺手写了几个文件"的糊状态。</p>
+  <p><span class="role">给产品经理</span>高风险、高返工成本的任务，正确的交互不是"边做边问一堆小问题"，而是"先给一份完整方案、一次性审批"。这对应两种产品节奏：<strong>澄清是低摩擦、随时可发生的；批准是高仪式感、集中一次的</strong>。把它们分开，用户既不会被碎问题打断，也不会在没看到全局计划时被要求签字。评估 Agent 产品的"可控性"，要看它是否在真正动手前给了用户一个看得见、能否决的全局计划关卡。</p>
+</div>
+
+<hr>
+
+<h2>本章代码</h2>
+
+<p>本章的示例在 <code>code/examples/askuserquestion_demo.py</code>。它在本地完整复刻 AskUserQuestion 的一次调用：schema 校验（1–4 问、2–4 选项、唯一性）、自动追加 "Other"（预览题除外）、推荐项置顶、并排预览渲染、多选/单选/Other 三种答案收集，以及最后把选择包成 <code>tool_result</code> 回流——纯本地运行，无需 API Key。</p>
+
+<pre><code class="language-python"># 纯本地运行，无需 API Key
+cd code
+uv run python examples/askuserquestion_demo.py</code></pre>
+
+<p>骨架与源码的对应关系：</p>
+
+<pre><code class="language-text"># askuserquestion_demo.py 骨架            ←→  src/ 路径
+
+def validate(questions)                   # inputSchema + UNIQUENESS_REFINE：
+  #   1–4 问 / 2–4 选项 / 唯一             #   AskUserQuestionTool.tsx:32, 62
+def render_options(q)                     # 自动追加 "Other"（预览题除外）
+  #   __other__ / 预览题不加              #   QuestionView.tsx:206 / PreviewQuestionView.tsx:69
+def has_any_preview(q)                     # !multiSelect && options.some(preview)
+                                          #   QuestionView.tsx:235
+def render_question(q)                    # 并排预览：左栏 30、间距 4
+  #   LEFT_PANEL_WIDTH / GAP              #   PreviewQuestionView.tsx:233
+def collect_answer(q)                     # 多选 ", " 连接 / Other 取自由输入
+                                          #   AskUserQuestionPermissionRequest.tsx:426
+def map_tool_result(answers, id)          # "User has answered your questions: …"
+  #   behavior:'ask' → tool_result        #   AskUserQuestionTool.tsx:182, 224</code></pre>
+
+<div class="page-nav">
+  <button class="page-nav-btn" onclick="showPage('ch8')">
+    <span class="nav-dir">← 上一章</span>
+    <span class="nav-title">第八章 · Session 持久化与恢复</span>
+  </button>
+  <button class="page-nav-btn next" onclick="showPage('ref')">
+    <span class="nav-dir">下一页 →</span>
+    <span class="nav-title">核心文件速查</span>
+  </button>
+</div>

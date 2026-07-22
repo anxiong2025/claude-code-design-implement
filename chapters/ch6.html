@@ -145,11 +145,14 @@ try {
 
 <p><strong>为什么拿到锁后要重读？</strong>锁保护的是 read-modify-write 全程，而不是 write 一下。等锁期间别人可能已经追加了消息，用等锁前读的旧数组覆盖回去就会丢信。这是所有"文件当数据库"场景的第一课，源码用注释把它钉死在那里。</p>
 
+<p><strong>这套方案的边界也要说清。</strong>信箱只增不删——消息被消费后仅置 <code>read=true</code>，从不物理删除（<code>clearMailbox</code> 定义了却全仓无人调用）；而每次写信都要重读整份 JSON、push、再整份回写，是 O(n) 的开销。于是长会话、高频互聊下信箱会持续膨胀、写入渐慢。这正说明它精确适配的是"秒级、低频、可审计"的团队协作，而非高吞吐场景——和 insight 里"消息机制要和交互节奏匹配"的结论收束在同一处取舍上。</p>
+
 <p>信箱之外还有一份<strong>名册</strong>：<code>TeamCreate</code> 工具创建 <code>~/.claude/teams/{team}/config.json</code>，记录全体成员（名字、agentId、颜色、活跃状态），同时创建一个同名任务列表目录——<strong>Team 与 TaskList 一一对应</strong>，任务的指派（TaskUpdate 的 owner 字段）和消息的投递共享同一套成员名单。广播（<code>to: '*'</code>）就是读名册、逐个写信箱的语法糖。</p>
 
 <div class="insight">
   <div class="insight-label">设计启示</div>
   <p><span class="role">给开发者</span>选传输层时先问时间尺度。Agent 回合是秒级的，消息延迟 1 秒无感知——此时持久性、可审计性、零部署的价值远大于吞吐和延迟。反过来，如果你的 Agent 需要毫秒级互动（比如协作编辑同一个文件的光标），文件轮询就是错的。<strong>没有"最好的消息机制"，只有和交互节奏匹配的消息机制。</strong></p>
+  <p><span class="role">给产品经理</span>信箱只是磁盘上的普通 JSON——用户能直接 <code>cat</code> 排查、进程崩了消息不丢、无需装 Redis 或起 daemon。对用户，这意味着"可自查、可信任、零安装"，而这三条产品属性正是"选文件而非 broker"换来的，不是额外做出来的。</p>
 </div>
 
 <h2 id="s6-2">6.2 寻址与收信——轮询、阻塞与递送语义</h2>
@@ -158,7 +161,7 @@ try {
 
 <p>信箱按名字寻址，那"我的名字"从哪来？这个看似平凡的问题因为队友有两种形态而变得讲究（<code>utils/teammate.ts</code>）：</p>
 
-<pre><code class="language-text">身份解析优先级（getAgentName / getTeamName）
+<pre><code class="language-text">身份解析优先级
 
 ① AsyncLocalStorage        进程内队友。同一个进程里可能同时跑着领队
    （teammateContext）      和 N 个进程内队友，全局变量会互相覆盖——
@@ -166,7 +169,11 @@ try {
                             隔离的身份，谁在跑就解析出谁。
 ② dynamicTeamContext       tmux 队友。独立进程，身份来自启动时的
    （CLI 参数注入）          CLI 参数（--agent-id --team-name）。
-③ AppState.teamContext     领队。它不是被派生的，身份记在应用状态里。</code></pre>
+③ 传入的 teamContext        仅 getTeamName 有这一层：领队不是被派生的，
+   （仅 getTeamName）         没有 ①②，靠调用方从 AppState 传入 teamContext 兜底。
+
+—— getAgentName 只有 ①② 两层（源码 JSDoc 原话）；领队的"名字"不由它解析，
+   而由轮询钩子/附件生成按 teammates[leadAgentId].name 反查得到。</code></pre>
 
 <p>值得停一秒的是第①层。进程内队友和领队<strong>共享同一份内存、同一个 React 状态树</strong>，"当前代码在为谁跑"这个问题没有全局答案，只有调用链上下文能回答。AsyncLocalStorage 在这里扮演的角色，和第四章 SubAgent 的隔离 messages 数组同构：<strong>并发的身份必须随执行流走，不能存在共享的地方。</strong></p>
 
@@ -234,7 +241,7 @@ try {
       <text class="ld" x="510" y="266">绝不打断进行中的工具。</text>
 
       <text class="ld" x="360" y="316" text-anchor="middle" fill="#C8344E">共同纪律：先安全递送（成轮 / 入队 / 拼附件），再回写 read=true——宁可重复，绝不丢失</text>
-      <text class="ls" x="360" y="338" text-anchor="middle">at-least-once + 按 id 幂等去重 = 教科书递送语义，总共几十行代码</text>
+      <text class="ls" x="360" y="338" text-anchor="middle">at-least-once + 消费端按天然键去重（权限按 tool_use_id、附件按 from+时间+正文前缀）</text>
     </g>
   </svg>
   <div class="figure-cap">三条收信通道覆盖接收方的三种状态：闲着（轮询成轮）、常驻等活（阻塞循环）、干活中（轮边界注入）。无论哪条，已读标记都在消息安全落地之后才写回——这是整个递送语义的支点。</div>
@@ -247,6 +254,7 @@ try {
 <div class="insight">
   <div class="insight-label">设计启示</div>
   <p><span class="role">给开发者</span>注意全书出现第三次的同构：工具结果注入（第一章）、协调器通知注入（第五章）、信箱消息注入（本章），全部是"把内容放进对方下一轮输入"。Mailbox 没有发明新的通信范式，它只是把"对方的输入队列"<strong>从进程内存搬到了文件系统</strong>——于是通信自动获得了跨进程、持久化、可审计三个属性，而模型侧的世界观完全不用变：还是收到一条消息，还是下一轮看到。</p>
+  <p><span class="role">给产品经理</span>"先安全递送、再标已读"的顺序换来的是"宁可重复不丢失"。用户感知到的，是队友之间不会漏消息、崩溃重启后对话还能接得上——可靠性不是靠承诺给出来的，是靠递送顺序设计出来的。多 Agent 产品最怕"消息黑洞"，这一条纪律就是对它的正面防御。</p>
 </div>
 
 <h2 id="s6-3">6.3 消息分类——数据面与控制面</h2>
@@ -296,18 +304,18 @@ try {
       <!-- Control plane -->
       <rect x="426" y="130" width="280" height="176" rx="10" fill="#E9F5EE" stroke="#1F8F5F" stroke-opacity=".5"/>
       <text class="lt" x="566" y="154" text-anchor="middle" fill="#1F8F5F">控制面 → 代码的处理器</text>
-      <text class="ls" x="442" y="178">permission_request / response</text>
-      <text class="ls" x="442" y="194">sandbox_permission_* （网络放行）</text>
-      <text class="ls" x="442" y="210">plan_approval_request / response</text>
-      <text class="ls" x="442" y="226">shutdown_request / approved / rejected</text>
-      <text class="ls" x="442" y="242">team_permission_update（权限同步）</text>
-      <text class="ls" x="442" y="258">mode_set_request（模式下发）</text>
-      <text class="ls" x="442" y="274">idle_notification（Stop 钩子发出）</text>
-      <text class="ls" x="442" y="290">task_assignment（任务指派）</text>
+      <text class="ls" x="442" y="180">permission_request / response</text>
+      <text class="ls" x="442" y="198">sandbox_permission_* （网络放行）</text>
+      <text class="ls" x="442" y="216">plan_approval_request / response</text>
+      <text class="ls" x="442" y="234">shutdown_request / shutdown_approved</text>
+      <text class="ls" x="442" y="252">team_permission_update · mode_set_request</text>
+      <text class="ld" x="566" y="272" text-anchor="middle" fill="#9a8f7b">白名单共 10 种（isStructuredProtocolMessage）；</text>
+      <text class="ld" x="566" y="288" text-anchor="middle" fill="#9a8f7b">名单外的 idle_notification / task_assignment /</text>
+      <text class="ld" x="566" y="302" text-anchor="middle" fill="#9a8f7b">shutdown_rejected 走数据面进模型</text>
 
-      <text class="ld" x="360" y="334" text-anchor="middle" fill="#C8344E">isStructuredProtocolMessage() 挡在数据面入口：协议消息绝不能混进模型上下文——</text>
-      <text class="ld" x="360" y="352" text-anchor="middle" fill="#C8344E">模型会试图"礼貌地回复"一个 JSON，而它的处理器却永远等不到它</text>
-      <text class="ld" x="360" y="380" text-anchor="middle">例外：shutdown_request 双面投递——代码知道要握手，模型也要读到它才能决定同不同意</text>
+      <text class="ld" x="360" y="342" text-anchor="middle" fill="#C8344E">判据只有一条：type 是否在 isStructuredProtocolMessage 的 10 项白名单里——在名单里才拦进控制面，</text>
+      <text class="ld" x="360" y="360" text-anchor="middle" fill="#C8344E">否则（含 idle_notification / task_assignment / shutdown_rejected）作为附件进模型上下文</text>
+      <text class="ld" x="360" y="386" text-anchor="middle">例外：shutdown_request 双面投递——代码知道要握手，模型也要读到它才能决定同不同意</text>
     </g>
   </svg>
   <div class="figure-cap">同一只信箱跑两个平面：自然语言走数据面进模型上下文，JSON 协议消息走控制面进代码处理器。分拣的依据只有一个——text 字段能否解析出已知的 type。</div>
@@ -322,6 +330,7 @@ try {
 <div class="insight">
   <div class="insight-label">设计启示</div>
   <p><span class="role">给开发者</span>"数据面/控制面分离"是网络设备的经典架构，在 LLM 系统里有了新含义：<strong>模型的上下文窗口是数据面，代码路径是控制面</strong>。设计多 Agent 协议时对每种消息问一句：模型读到它能做什么？能行动的进上下文，不能行动的走代码，需要知情又需要代码动作的双面投递。这个三分法比"全部塞给模型"（浪费+误导）和"全部代码处理"（模型失去决策权）都更精确。</p>
+  <p><span class="role">给产品经理</span>控制面的机器信令永不进模型上下文，直接的产品收益是：用户在对话记录里只看到自然语言，不会被一串 <code>{"type":...}</code> 的 JSON 污染阅读，也不会撞见模型"一本正经回复一条协议消息"的怪异输出。协议做得越干净，用户越感觉不到多 Agent 的机械齿轮在转——这正是好的系统该有的隐形感。</p>
 </div>
 
 <h2 id="s6-4">6.4 协议实战——权限瞬移与优雅关机</h2>
@@ -388,7 +397,7 @@ try {
   <div class="figure-cap">权限瞬移的完整往返：队友挂起工具调用并注册回调，请求信 1 秒内到达领队并弹出与本地完全一致的权限 UI，用户的决定原路写回，回调 resolve，工具从挂起处继续。整套跨进程 RPC 没有一个 socket。</div>
 </div>
 
-<p>两个细节把这个协议从"能用"提升到"好用"。其一，领队侧不是弹一个简陋的"允许 ada 执行 Bash？"文本框，而是把请求<strong>灌进本地权限系统的标准队列</strong>（<code>ToolUseConfirmQueue</code>），复用全部原生 UI——Bash 命令高亮、文件编辑 diff 视图，只多一个"来自 ada"的徽章。跨进程的请求和本地的请求在用户眼里没有任何区别，这是第七章权限系统统一入口的直接红利。其二，响应消息携带 <code>updated_input</code> 和 <code>permission_updates</code>——用户在领队屏幕上不仅能批准，还能<strong>修改命令再批准</strong>、能勾选"以后都允许"，这些决定会通过 <code>team_permission_update</code> 广播给全队生效。</p>
+<p>两个细节把这个协议从"能用"提升到"好用"。其一，领队侧不是弹一个简陋的"允许 ada 执行 Bash？"文本框，而是把请求<strong>灌进本地权限系统的标准队列</strong>（<code>ToolUseConfirmQueue</code>），复用全部原生 UI——Bash 命令高亮、文件编辑 diff 视图，只多一个"来自 ada"的徽章。跨进程的请求和本地的请求在用户眼里没有任何区别，这是第七章权限系统统一入口的直接红利。其二，响应消息携带 <code>updated_input</code> 和 <code>permission_updates</code>——用户在领队屏幕上不仅能批准，还能<strong>修改命令再批准</strong>、能勾选"以后都允许"，这些决定随 <code>permission_response</code> 原路写回<strong>发起请求的那个队友</strong>（<code>sendPermissionResponseViaMailbox</code>），由它在本地应用，作用域是该队友本人——不是全队。（源码里另有一个 <code>team_permission_update</code> 类型定义好了、消费端也接上了，但当前版本尚无任何代码构造并发送它，是一条留了口子却没接线的通道，读者不必去找它的"广播"实现。）</p>
 
 <p>顺着这条线还能看到<strong>信任模型的边界</strong>，源码处理得很诚实：信箱文件谁都能写，<code>from</code> 字段是自愿声明，所以关键协议都做了来源校验——计划审批只认 <code>from === 'team-lead'</code>（"prevent teammates from forging approvals"），模式下发同样只认领队。但这层校验防的是<strong>混乱</strong>（队友互相误发、模型幻觉出一条审批），不是<strong>恶意</strong>——同一台机器、同一个用户账户下的进程本来就在同一信任域里，真正的安全边界在第七章的权限系统，不在信箱。</p>
 
@@ -399,8 +408,9 @@ try {
 <pre><code class="language-text">优雅关机握手（leader ⇄ teammate，全程走信箱）
 
 ① leader → shutdown_request { requestId, reason }
-     队友的等待循环里它有插队权（6.2），不会被聊天消息淹没；
-     但它走"双面投递"——最终决定权在队友的模型手里。
+     进程内队友的等待循环里它有插队权（6.2），不会被聊天消息淹没；
+     tmux 队友则由 1s 轮询把它当普通消息交给模型，靠模型尽快响应。
+     无论哪种，它都走"双面投递"——最终决定权在队友的模型手里。
 
 ② 队友模型读到请求，检查手头工作，二选一：
      approveShutdown → shutdown_approved { paneId, backendType }

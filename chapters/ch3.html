@@ -22,7 +22,7 @@
 
 <h2 id="s3-1">3.1 Tool 接口——一个契约，四个受众</h2>
 
-<p>在 Claude Code 里，一个"工具"不是一个函数，而是一个<strong>实现了 <code>Tool&lt;Input, Output, P&gt;</code> 接口的对象</strong>（<code>Tool.ts:281</code>）。这个接口有 40+ 个成员，乍看臃肿——但它并不是设计失控，而是因为一个工具要同时对<strong>四个完全不同的消费者</strong>作出承诺：</p>
+<p>在 Claude Code 里，一个"工具"不是一个函数，而是一个<strong>实现了 <code>Tool&lt;Input, Output, P&gt;</code> 接口的对象</strong>（<code>Tool.ts:362</code>）。这个接口有 40+ 个成员，乍看臃肿——但它并不是设计失控，而是因为一个工具要同时对<strong>四个完全不同的消费者</strong>作出承诺：</p>
 
 <ul>
   <li><strong>对模型</strong>：<code>inputSchema</code>、<code>description()</code>、<code>prompt()</code>——"我是谁、怎么调用我"；</li>
@@ -93,7 +93,7 @@
       </g>
       <!-- Center label -->
       <text x="360" y="228" text-anchor="middle" font-family="'Inter',system-ui,sans-serif" font-size="13" font-weight="600" fill="#3a3326">Tool&lt;Input, Output, P&gt;</text>
-      <text x="360" y="248" text-anchor="middle" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="10.5" fill="#9a8f7b">src/Tool.ts:281</text>
+      <text x="360" y="248" text-anchor="middle" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="10.5" fill="#9a8f7b">src/Tool.ts:362</text>
       <line x1="14" y1="212" x2="706" y2="212" stroke="#e5e5e0" stroke-width="1"/>
 
       <!-- Row 3: description + prompt -->
@@ -110,7 +110,7 @@
 
 <p>抓住本章要用到的核心成员：</p>
 
-<pre><code class="language-typescript">// Tool.ts:281 — 精简版，只保留本章必须理解的字段
+<pre><code class="language-typescript">// Tool.ts:362 — 精简版，只保留本章必须理解的字段
 type Tool&lt;Input, Output, P&gt; = {
   name: string                          // 唯一标识，模型靠这个名字发起调用
 
@@ -147,11 +147,18 @@ type Tool&lt;Input, Output, P&gt; = {
 
 <h3>3.1.1 权限流水线：validateInput → checkPermissions → call</h3>
 
-<p>每次工具调用在进入 <code>call()</code> 之前，必须过两道关（<code>toolExecution.ts:683</code>）：</p>
+<p>每次工具调用在进入 <code>call()</code> 之前，必须依次过 safeParse → validateInput → checkPermissions 三道关（<code>toolExecution.ts:615 / 683 / 599</code>）：</p>
 
 <pre><code class="language-typescript">// toolExecution.ts（简化）
 async function checkPermissionsAndCallTool(tool, input, ctx, ...) {
-  // ── 第一道：语义校验（input 层）
+  // ── 第 0 道：Zod 结构校验（safeParse，管"格式对不对"）
+  const parsed = tool.inputSchema.safeParse(input)
+  if (!parsed.success) {
+    return [errorResult('InputValidationError')]   // 参数结构就不对，第一道就拦
+  }
+  const parsedInput = parsed.data
+
+  // ── 第一道：语义校验（validateInput，管"业务上合不合理"）
   const isValid = await tool.validateInput?.(parsedInput, ctx)
   if (isValid?.result === false) {
     return [errorResult(isValid.message)]   // 直接拒绝，不走权限
@@ -168,7 +175,7 @@ async function checkPermissionsAndCallTool(tool, input, ctx, ...) {
   return [resultMessage(result)]
 }</code></pre>
 
-<p><code>validateInput</code> 负责语义层面的前置检查——"路径必须是绝对路径"这类业务规则，与权限无关，失败直接返回错误、不弹权限框。<code>checkPermissions</code> 则是工具级的自定义权限逻辑（全局权限框架在第七章），例如 MCP 工具在这里统一返回 <code>passthrough</code>，让上层权限系统接管。</p>
+<p>三道关分工清晰：<code>safeParse</code> 管"参数结构/类型对不对"（缺字段、类型错，直接判 <code>InputValidationError</code>），这是真正的第一道门。<code>validateInput</code> 管"业务上合不合理"——"路径必须是绝对路径"这类语义规则，与权限无关，失败直接返回错误、不弹权限框。<code>checkPermissions</code> 则是工具级的自定义权限逻辑（全局权限框架在第七章），例如 MCP 工具在这里统一返回 <code>passthrough</code>，让上层权限系统接管。</p>
 
 <p>还有一条贯穿整条流水线的铁律：<strong>错误不逃逸</strong>。参数校验失败、权限被拒、<code>call()</code> 执行中抛异常——所有失败路径都不会向上抛，而是被包装成 <code>is_error: true</code> 的 tool_result 送回消息数组。对循环来说，错误只是另一种观察结果：模型看到"Edit 失败：old_string 不唯一"，下一轮自己修正参数重试。工具系统靠这条规则获得了自愈能力——任何单次工具失败都不足以杀死 Agent Loop。</p>
 
@@ -189,7 +196,7 @@ const TOOL_DEFAULTS = {
   isDestructive:      () => false,
   checkPermissions:   () => Promise.resolve({ behavior: 'allow', updatedInput }),
   toAutoClassifierInput: () => '',   // ← 默认不参与安全分类器
-  userFacingName:     () => name,
+  userFacingName:     () => '',      // ← 默认空串，真正的 name 由下方 buildTool 覆盖
 }
 
 // Tool.ts:783
@@ -239,9 +246,9 @@ isReadOnly(input) {
 
 <h3>3.3.1 partitionToolCalls：分批</h3>
 
-<p>分批算法是一个贪心分组（<code>toolOrchestration.ts:84</code>）：从左往右扫描工具调用列表，把相邻的"并发安全"工具合并进同一个批次，只要遇到一个"不安全"的工具就新开一个批次：</p>
+<p>分批算法是一个贪心分组（<code>toolOrchestration.ts:91</code>）：从左往右扫描工具调用列表，把相邻的"并发安全"工具合并进同一个批次，只要遇到一个"不安全"的工具就新开一个批次：</p>
 
-<pre><code class="language-typescript">// toolOrchestration.ts:84
+<pre><code class="language-typescript">// toolOrchestration.ts:91
 function partitionToolCalls(
   toolUseMessages: ToolUseBlock[],
   toolUseContext: ToolUseContext,
@@ -347,9 +354,9 @@ function partitionToolCalls(
 
 <h3>3.3.2 runTools：批次执行</h3>
 
-<p><code>runTools</code> 是调度器的主入口，它遍历分批结果，对每个批次选择对应的执行策略（<code>toolOrchestration.ts:23</code>）：</p>
+<p><code>runTools</code> 是调度器的主入口，它遍历分批结果，对每个批次选择对应的执行策略（<code>toolOrchestration.ts:19</code>）：</p>
 
-<pre><code class="language-typescript">// toolOrchestration.ts:23
+<pre><code class="language-typescript">// toolOrchestration.ts:19
 export async function* runTools(...): AsyncGenerator&lt;MessageUpdate&gt; {
   let currentContext = toolUseContext
 
@@ -402,7 +409,8 @@ export async function* all&lt;A&gt;(
 
   while (promises.size > 0) {
     // 谁先返回就先 yield，不等慢的那个
-    const { done, value, generator } = await Promise.race(promises)
+    const { done, value, generator, promise } = await Promise.race(promises)
+    promises.delete(promise)   // ← 关键：把已决议的 promise 移出 Set，否则它会被反复 race 成死循环
     if (!done) {
       promises.add(next(generator))
       if (value !== undefined) yield value
@@ -413,7 +421,7 @@ export async function* all&lt;A&gt;(
   }
 }</code></pre>
 
-<p>并发上限由环境变量 <code>CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY</code> 控制，默认值 <code>10</code>（<code>toolOrchestration.ts:11</code>）。这个值不是随意选的：文件读操作是 I/O 密集型，10 并发能让磁盘 I/O 充分饱和，同时避免文件描述符耗尽。</p>
+<p>并发上限由环境变量 <code>CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY</code> 控制，默认值 <code>10</code>（<code>toolOrchestration.ts:10</code>，<code>parseInt(...) || 10</code>）。注意这个 cap 作用于整个并发批次，而不只是文件读：因为下一章的 <code>Agent</code> 工具也声明 <code>isConcurrencySafe()→true</code>，会落进同一批，所以这个环境变量同时封顶了"一次最多并行几个 SubAgent"——用户感知到的"Claude Code 一次能同时干几件事"就由这一个可调值决定，这也是它做成环境变量而非硬编码的原因。</p>
 
 <div class="figure">
   <div class="figure-head">
@@ -605,9 +613,9 @@ for (const tool of mcpTools) {
   <p>ToolSearch 把"声明存在"和"提供完整用法"拆成两个阶段：System Prompt 里默认只列延迟工具的<strong>名字</strong>；模型需要时先调 <code>ToolSearch</code> 拉取完整 Schema，再发起真正的调用。与浏览器的代码分割（code splitting）思路相同——先加载首屏，其余按需拉取。</p>
 </div>
 
-<p>一个工具是否"被延迟加载"由两个条件决定（<code>toolSearch.ts:isDeferredTool</code>）：</p>
+<p>一个工具是否"被延迟加载"由几个条件决定（<code>src/tools/ToolSearchTool/prompt.ts:62</code>）：</p>
 
-<pre><code class="language-typescript">// toolSearch.ts
+<pre><code class="language-typescript">// prompt.ts:62
 export function isDeferredTool(tool: Tool): boolean {
   if (tool.alwaysLoad === true) return false   // 明确要求首屏加载
 
@@ -634,7 +642,7 @@ tool_result: &lt;functions&gt;{"name": "mcp__figma__get_design_context",
 # 第二步：该工具从此可以正常调用（schema 已在上下文中，本会话内复用）
 tool_use:   mcp__figma__get_design_context { ... }</code></pre>
 
-<p>代价是多一轮往返，收益是首屏 token 节省约 40%——而且 Schema 一旦进入上下文就可以在整个会话中复用，往返成本只付一次。</p>
+<p>代价是多一轮往返，收益是首屏只保留每个延迟工具一行名字，Schema 大头按需拉取——挂载的 MCP 工具越多，节省越显著；而且 Schema 一旦进入上下文就可以在整个会话中复用，往返成本只付一次。</p>
 
 <div class="insight">
   <div class="insight-label">设计启示</div>
@@ -697,7 +705,7 @@ uv run python examples/tool_demo.py</code></pre>
 <pre><code class="language-text"># tool_demo.py 骨架                     ←→  src/ 路径
 
 @dataclass                              # Tool 接口
-class Tool:                             #   src/Tool.ts:281
+class Tool:                             #   src/Tool.ts:362
   name: str
   is_concurrency_safe: bool             #   isConcurrencySafe()
   is_read_only: bool                    #   isReadOnly()
@@ -707,10 +715,10 @@ def build_tool(def_) → Tool             # buildTool()
                                         #   src/Tool.ts:783
 
 def partition_tool_calls(tools) → Batch[]  # partitionToolCalls()
-                                           #   src/services/tools/toolOrchestration.ts:84
+                                           #   src/services/tools/toolOrchestration.ts:91
 
 async def run_tools(batches) → results     # runTools()
-                                           #   src/services/tools/toolOrchestration.ts:23
+                                           #   src/services/tools/toolOrchestration.ts:19
 
 async def all(generators, cap) → ...       # all()
                                            #   src/utils/generators.ts:32</code></pre>

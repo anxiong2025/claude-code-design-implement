@@ -167,6 +167,7 @@
 <div class="insight">
   <div class="insight-label">设计启示</div>
   <p><span class="role">给开发者</span>日志式存储三件事一起白拿：持久化、审计、时间旅行——全部来自"只追加、不改写"这一条纪律。给状态建模时先问一句：<strong>历史需要不可变吗？</strong>需要，就存事件日志而不是最新快照；快照永远可以从日志推出来，反过来不行。</p>
+  <p><span class="role">给产品经理</span>"只追加、从不删"直接兑现成三个用户能感知的承诺：崩溃不丢进度、<code>/rewind</code> 能反悔、聊过的对话永远翻得回来。这不是三个功能各自攒出来的，是一个存储决定顺带发的红利——<strong>底层选对了，产品层的"后悔药"和"安全感"几乎白送</strong>。反过来，若一开始图省事存"最新快照覆盖写"，这三件事日后每一件都要单独立项、单独踩坑。</p>
 </div>
 
 <h2 id="s8-2">8.2 恢复机制——从叶子回走一条链</h2>
@@ -188,15 +189,24 @@ transcript.reverse()
 // 一个 message.id），单亲回走只保得住一支——读侧把兄弟找回来
 return recoverOrphanedParallelToolResults(messages, transcript, seen)</code></pre>
 
-<p><strong>存的时候是树，读的时候是链。</strong><code>--continue</code> 取最新的叶子；<code>--resume</code> 弹列表让用户挑（每个会话只读文件尾 16KB 的元数据窗口来显示标题，不必解析整个文件）；<code>--fork-session</code> 则把链复制到一个新 sessionId 下继续——原会话不动，这是会话级的"另存为"。三个入口共享同一条回走逻辑，差别只在"选哪片叶子"和"要不要换身份"。</p>
+<p><strong>存的时候是树，读的时候是链。</strong><code>--continue</code> 取最新的叶子；<code>--resume</code> 弹列表让用户挑（每个会话只读文件<strong>头尾各约 64KB</strong> 的窗口就能拿到标题和首条提问，不必解析动辄上 GB 的整个文件——<code>LITE_READ_BUF_SIZE=65536</code>，头部拿元数据、尾部拿最新状态）；<code>--fork-session</code> 则把链复制到一个新 sessionId 下继续——原会话不动，这是会话级的"另存为"。三个入口共享同一条回走逻辑，差别只在"选哪片叶子"和"要不要换身份"。</p>
 
-<p>但只把消息读回来，恢复才完成一半。<code>processResumedConversation</code>（sessionRestore.ts:409）还原的是<strong>整个工作现场</strong>：任务清单不单独存文件，而是从转录里挖——扫描最后一次 <code>TodoWrite</code> 工具调用的入参（<code>extractTodosFromTranscript</code>），转录本身就是数据库；worktree 状态更妙，恢复时直接 <code>process.chdir(worktreePath)</code>，源码注释点破："process.chdir is the TOCTOU-safe existence check"——切目录这个动作同时兼任存在性检查，目录被删了就抛 ENOENT，顺势把状态改记成"已退出"，不需要"先检查再切换"的竞态两步；此外还有 agent 身份与模型覆盖、成本统计、会话标题，逐项归位。</p>
+<p>但只把消息读回来，恢复才完成一半。<code>processResumedConversation</code>（sessionRestore.ts:409）还原的是<strong>整个工作现场</strong>：任务清单分两条路——交互模式（你日常敲 <code>claude --continue</code> 这条）走 v2 任务，本就落在 <code>~/.claude/tasks/</code> 下按文件存，恢复时直接读回；只有 SDK／非交互模式（<code>isTodoV2Enabled()</code> 为假）才退回"从转录里挖"——扫描最后一次 <code>TodoWrite</code> 工具调用的入参（<code>extractTodosFromTranscript</code>），把转录本身当数据库。此外还有 agent 身份与模型覆盖、成本统计、会话标题，逐项归位。</p>
 
-<p>防御性细节也都是生产事故喂出来的：转录读取有 50MB 硬顶（<code>MAX_TRANSCRIPT_READ_BYTES</code>，注释记着案发编号：会话文件能长到数 GB）；大文件在文件描述符层直接跳过 compact 边界之前的字节——峰值内存按<strong>输出</strong>大小分配而不是按文件大小（一个 151MB、84% 是过期快照的会话，加载内存从 316MB 降到 155MB）；回走时的 <code>seen</code> 集合防 parentUuid 成环——文件是外部输入，哪怕是自己写的，读的时候也当不可信数据对待。</p>
+<p>worktree 状态的恢复藏着一个漂亮的小技巧。常规写法是"先检查目录还在不在，再切进去"，但这两步之间目录可能正好被删——这类"检查完、动手前状态变了"的竞态有个名字叫 <strong>TOCTOU</strong>（time-of-check to time-of-use）。这里的做法是干脆不检查：恢复时直接 <code>process.chdir(worktreePath)</code> 切进去，源码注释点破——"process.chdir is the TOCTOU-safe existence check"。切目录这个动作<strong>本身就兼任了存在性检查</strong>：目录还在就切成功，被删了就抛 ENOENT，顺势把状态改记成"已退出"。一步原子操作，天然没有竞态窗口。</p>
+
+<p>剩下一堆防御性细节，都是生产事故一条条喂出来的，值得单独说：</p>
+
+<ul>
+  <li><strong>50MB 硬顶</strong>（<code>MAX_TRANSCRIPT_READ_BYTES</code>）：转录文件真能长到数 GB，注释里还记着案发编号。超过就拒读，绝不让一个失控的大文件把内存撑爆。</li>
+  <li><strong>只读 boundary 之后的字节</strong>：加载大文件时，压缩边界之前的旧史根本不读进来——在读文件的最底层（直接按字节偏移 <code>seek</code>，连解析都省了）就跳过去。效果是峰值内存只按"真正要用的输出"算，而不是按整个文件算：一个 151MB、其中 84% 是过期快照的会话，加载内存从 316MB 压到 155MB。</li>
+  <li><strong><code>seen</code> 集合防成环</strong>：回走时万一 parentUuid 首尾相连（写坏了、或被手改过），<code>seen</code> 会及时刹车。转录文件是外部输入，哪怕是程序自己写的，读的时候也一律当不可信数据对待。</li>
+</ul>
 
 <div class="insight">
   <div class="insight-label">设计启示</div>
-  <p><span class="role">给开发者</span>恢复的完整定义是<strong>"用户回来之后，不需要向系统重新解释任何事"</strong>。消息数组只是及格线；真正拉开差距的是环境状态——cwd、任务清单、后台任务、半途的计划。列一张"崩溃前用户拥有什么"的清单，逐项回答两个问题：存在哪？怎么恢复？凡是答不上来的项，就是用户将来要骂的地方。另外注意 Claude Code 的选择：todos 这类"可以从消息推导的状态"就不单独存——<strong>单一事实源，能推导就不冗余</strong>。</p>
+  <p><span class="role">给开发者</span>恢复的完整定义是<strong>"用户回来之后，不需要向系统重新解释任何事"</strong>。消息数组只是及格线；真正拉开差距的是环境状态——cwd、任务清单、后台任务、半途的计划。列一张"崩溃前用户拥有什么"的清单，逐项回答两个问题：存在哪？怎么恢复？凡是答不上来的项，就是用户将来要骂的地方。这里也藏着一个务实的取舍：能不能"从消息推导"要看代价——交互模式下任务清单单独落文件（读回一步到位），只有 SDK 模式才退回从转录扫 <code>TodoWrite</code> 重建。<strong>推导 vs 冗余存不是信仰之争，是按场景算成本</strong>：推导便宜就别存，推导要重扫全量转录就老实存。</p>
+  <p><span class="role">给产品经理</span>"恢复"这个词对用户和对工程师的含义不一样。用户以为的恢复是"我离开时的样子原样回来"——包括我 cd 到哪、任务清单勾到第几项、在不在计划模式里；工程师容易只把"聊天记录"读回来就交差。这中间的落差，就是用户嘴上说"能续接"、心里觉得"还是得重新交代一遍"的根源。<strong>定义"恢复完成"时，标准要站在用户的现场，而不是数据的现场</strong>——数组读回来只是及格，工作现场归位才是体验。</p>
 </div>
 
 <h2 id="s8-3">8.3 Compact——模型给自己写交接文档</h2>
@@ -208,7 +218,7 @@ return recoverOrphanedParallelToolResults(messages, transcript, seen)</code></pr
 警告线     = 压缩线 − 20_000                               # UI 提前亮黄灯
 手动硬顶   = 有效窗口 − 3_000                              # /compact 的最后余地
 
-连续失败 3 次熔断                    # 有会话曾连续重试 3272 次，白烧 25 万次 API 调用/天
+连续失败 3 次熔断                    # 曾有单个会话连续失败 3272 次；全局每天白烧约 25 万次 API 调用
 </code></pre>
 
 <p>每个数字都在回答"压缩这件事自己也要花钱"：压缩要调一次模型、产出最多 2 万 token 的摘要，所以阈值必须在真正的硬顶之前留够余量；压缩可能失败（上下文已经大到连"请你总结"这个请求都发不出去），所以有专门的重试策略（掐掉最老的几轮再试）和熔断器。</p>
@@ -270,11 +280,12 @@ return recoverOrphanedParallelToolResults(messages, transcript, seen)</code></pr
       <text class="ld" x="555" y="270" text-anchor="middle">模型醒来：读交接文档，接着干</text>
 
       <!-- disk -->
-      <rect x="30" y="310" width="660" height="52" rx="12" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
-      <text class="ld" x="360" y="332" text-anchor="middle">磁盘 JSONL：压缩前的全部消息原样还在；boundary 的 parentUuid=null 掐断链——</text>
-      <text class="ld" x="360" y="348" text-anchor="middle">下次 --continue 从 boundary 起步，旧史不进内存但永远可查（加载器甚至在 fd 层跳过它们）</text>
+      <rect x="30" y="308" width="660" height="66" rx="12" fill="#F4F4F1" stroke="#9a8f7b" stroke-opacity=".55"/>
+      <text class="ld" x="360" y="328" text-anchor="middle">磁盘 JSONL：压缩前的全部消息原样还在；boundary 把 parentUuid 置 null 掐断"加载链"</text>
+      <text class="ld" x="360" y="344" text-anchor="middle">同时另存 logicalParentUuid 指回真父——真实的树没断，keepAllLeaves 能整棵读回</text>
+      <text class="ld" x="360" y="362" text-anchor="middle">下次 --continue 从 boundary 起步，旧史不进内存但永远可查（加载器甚至跳过读它们）</text>
 
-      <text class="ld" x="360" y="388" text-anchor="middle" fill="#C8344E">压缩杀死的不是记忆，是工作集——所以重建工作集（重读文件、重播工具清单）是压缩体验的一半</text>
+      <text class="ld" x="360" y="392" text-anchor="middle" fill="#C8344E">压缩杀死的不是记忆，是工作集——所以重建工作集（重读文件、重播工具清单）是压缩体验的一半</text>
     </g>
   </svg>
   <div class="figure-cap">Compact 用一次模型调用把 180K 的历史换成 20K 的交接文档，再按预算重建工作集：重读最近碰过的文件、恢复计划与技能上下文、重播工具清单。转录文件不删任何东西，boundary 只是让"当前对话"从新页开始。</div>
@@ -282,7 +293,7 @@ return recoverOrphanedParallelToolResults(messages, transcript, seen)</code></pr
 
 <p>图右侧的<strong>灾后重建</strong>是最容易被忽略、又最影响体验的一半。摘要写完后上下文被清空，模型对文件系统的"工作记忆"（<code>readFileState</code>）也没了——不重建的话，它醒来第一件事就是把刚才读过的文件挨个重读一遍，压缩省下的 token 立刻还回去。所以 compact 之后自动重注入：最近读过/改过的至多 5 个文件（总预算 50K token、单文件 5K）、进行中的 plan 文件、plan 模式提醒（不然模型压缩完就忘了自己在 plan 模式里）、用过的 skills，以及把工具/Agent/MCP 清单对"空历史"重播一遍——第二章的增量通告机制（一句话回顾：工具清单只在变化时以 delta 附件通告）在空历史上 diff，天然等于全量重播，一行特殊代码都不用加。</p>
 
-<p>全量压缩之外还有两档更轻的手段，构成一个梯度：<strong>microcompact</strong> 不调模型，直接把老的工具结果原地替换成一行 <code>[Old tool result content cleared]</code>——只清 Read/Bash/Grep 这类<strong>可再生</strong>的内容（想要随时能重跑），保留最近 N 个；再往下沉是 <strong>API 侧的 context editing</strong>（<code>clear_thinking</code> / <code>clear_tool_uses</code> 策略），擦除动作直接发生在服务端。三档的成本阶梯很清晰：先擦可再生的（免费），再摘要不可再生的（一次模型调用），实在不行才掐头截断（有损）——每一层都比下一层便宜，也都比下一层保真。</p>
+<p>全量压缩之外还有两档更轻的手段，构成一个梯度：<strong>microcompact</strong> 不调模型，直接把老的工具结果原地替换成一行 <code>[Old tool result content cleared]</code>——只清一张白名单里的 8 类工具（<code>COMPACTABLE_TOOLS</code>：Read / Bash / Grep / Glob / WebSearch / WebFetch / Edit / Write），保留最近 N 个。选这 8 类的共同点是<strong>结果可从现场重取</strong>：文件此刻长什么样、命令输出是什么，需要时再读一遍就有——清掉的是"当时的快照"，不是"改过的事实"（Edit/Write 的落盘早已发生，清的只是那条回执文本）；再往下沉是 <strong>API 侧的 context editing</strong>（<code>clear_thinking</code> / <code>clear_tool_uses</code> 策略），擦除动作直接发生在服务端。三档的成本阶梯很清晰：先擦可再生的（免费），再摘要不可再生的（一次模型调用），实在不行才掐头截断（有损）——每一层都比下一层便宜，也都比下一层保真。</p>
 
 <div class="insight">
   <div class="insight-label">设计启示</div>
@@ -315,7 +326,8 @@ def resume(path)                          # processResumedConversation()：
 def rewind(from_uuid)                     # 分叉：新消息 parentUuid 指向历史点，
                                           #   旧枝留在文件里
 def compact(messages)                     # compactConversation()：摘要 + boundary
-  #   boundary.parentUuid = None 掐链     #   services/compact/compact.ts:387
+  #   boundary.parentUuid=None 掐加载链    #   services/compact/compact.ts:387
+  #   logicalParentUuid 仍指真父，树不断   #   utils/sessionStorage.ts:1040
 阈值公式 / 灾后重建常量                    # autoCompact.ts:62 + compact.ts:122</code></pre>
 
 <div class="page-nav">
@@ -323,8 +335,8 @@ def compact(messages)                     # compactConversation()：摘要 + bou
     <span class="nav-dir">← 上一章</span>
     <span class="nav-title">第七章 · 权限与安全</span>
   </button>
-  <button class="page-nav-btn next" onclick="showPage('ref')">
-    <span class="nav-dir">下一页 →</span>
-    <span class="nav-title">核心文件速查</span>
+  <button class="page-nav-btn next" onclick="showPage('ch9')">
+    <span class="nav-dir">下一章 →</span>
+    <span class="nav-title">第九章 · 生成式交互模式</span>
   </button>
 </div>
